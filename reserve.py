@@ -232,6 +232,16 @@ def fmt_slots(slots):
     return ", ".join(f"{s['time']} {s['resourceName']}" for s in slots)
 
 
+def send_slack(webhook_url, text):
+    """Post a message to a Slack incoming webhook. Failures are logged, not raised."""
+    try:
+        resp = requests.post(webhook_url, json={"text": text}, timeout=(5, 10))
+        resp.raise_for_status()
+        log.info("Slack notification sent")
+    except Exception as e:
+        log.warning("Slack notification failed: %s", e)
+
+
 # ── Interactive prompts ────────────────────────────────────────────────────────
 
 def prompt_date(days_ahead):
@@ -354,11 +364,11 @@ def run_auto(session, token, sso_id, config, fallback=False):
             log.warning("member_ids not in config — skipping reservation check")
 
     def try_date(target_date):
-        """Search and book a single date. Returns True if booked, False if skipped/no slot."""
+        """Search and book a single date. Returns the booked slot dict, or None if skipped/no slot."""
         date_str = target_date.strftime("%Y-%m-%d")
         if date_str in reserved_dates:
             log.info("Skipping %s — already have a reservation", date_str)
-            return False
+            return None
 
         log.info("Searching %s ...", target_date.strftime("%A %Y-%m-%d"))
         result = search_courts(session, token, sso_id, club_id, sport, target_date, duration)
@@ -366,20 +376,20 @@ def run_auto(session, token, sso_id, config, fallback=False):
 
         if not slots:
             log.info("No courts available on %s", date_str)
-            return False
+            return None
 
         log.info("Available: %s", fmt_slots(slots))
 
         slot = auto_pick(slots, preferred_times, preferred_courts)
         if slot is None:
             log.info("No preferred slot on %s", date_str)
-            return False
+            return None
 
         log.info("Booking %s %s ...", slot["time"], slot["resourceName"])
         booking = book_court(session, token, sso_id, slot["resourceId"], slot["start"], duration)
         log.info("Confirmed: regId=%s, status=%s, location=%s",
                  booking["regId"], booking["regStatus"], booking.get("location", ""))
-        return True
+        return slot
 
     # Priority 1: day 8 — search once, then retry only the booking step
     # Retrying book (not search) on 5xx means we keep the slot locked across attempts
@@ -390,19 +400,22 @@ def run_auto(session, token, sso_id, config, fallback=False):
     log.info("Searching %s ...", day8.strftime("%A %Y-%m-%d"))
     try:
         result = search_courts(session, token, sso_id, club_id, sport, day8, duration)
-        slots = collect_slots(result)
+        day8_slots = collect_slots(result)
     except Exception as e:
         log.error("Search failed for %s: %s", day8_str, e)
-        slots = []
+        day8_slots = []
 
     slot = None
-    if slots:
-        log.info("Available: %s", fmt_slots(slots))
-        slot = auto_pick(slots, preferred_times, preferred_courts)
+    if day8_slots:
+        log.info("Available: %s", fmt_slots(day8_slots))
+        slot = auto_pick(day8_slots, preferred_times, preferred_courts)
         if slot is None:
             log.info("No preferred slot on %s", day8_str)
     else:
         log.info("No courts available on %s", day8_str)
+
+    booked_slot = None
+    booked_date = None
 
     if slot is not None:
         for attempt in range(1, retry_count + 1):
@@ -417,7 +430,9 @@ def run_auto(session, token, sso_id, config, fallback=False):
                                      slot["resourceId"], slot["start"], duration)
                 log.info("Confirmed: regId=%s, status=%s, location=%s",
                          booking["regId"], booking["regStatus"], booking.get("location", ""))
-                return
+                booked_slot = slot
+                booked_date = day8
+                break
             except requests.HTTPError as e:
                 status = e.response.status_code if e.response is not None else None
                 log.error("Day %d booking attempt %d/%d failed: %s",
@@ -428,10 +443,10 @@ def run_auto(session, token, sso_id, config, fallback=False):
                     try:
                         result = search_courts(session, token, sso_id,
                                                club_id, sport, day8, duration)
-                        slots = collect_slots(result)
-                        if slots:
-                            log.info("Available: %s", fmt_slots(slots))
-                        slot = auto_pick(slots, preferred_times, preferred_courts) if slots else None
+                        new_slots = collect_slots(result)
+                        if new_slots:
+                            log.info("Available: %s", fmt_slots(new_slots))
+                        slot = auto_pick(new_slots, preferred_times, preferred_courts) if new_slots else None
                     except Exception as search_e:
                         log.error("Re-search failed: %s", search_e)
                         slot = None
@@ -443,10 +458,13 @@ def run_auto(session, token, sso_id, config, fallback=False):
                 log.error("Day %d booking attempt %d/%d failed: %s",
                           days_ahead, attempt, retry_count, e)
 
+    if booked_slot is not None:
+        return booked_date, booked_slot, day8_slots
+
     if not fallback:
         log.info("No booking on day %d — fallback scan disabled (use --fallback to scan days 1–%d)",
                  days_ahead, days_ahead - 1)
-        return
+        return None, None, day8_slots
 
     # Priority 2: scan days 1–7 once (no retry)
     log.info("No booking on day %d — scanning days 1–%d ...", days_ahead, days_ahead - 1)
@@ -454,12 +472,14 @@ def run_auto(session, token, sso_id, config, fallback=False):
     for i in range(1, days_ahead):
         target = today + timedelta(days=i)
         try:
-            if try_date(target):
-                return
+            booked = try_date(target)
+            if booked is not None:
+                return target, booked, day8_slots
         except Exception as e:
             log.error("Error trying %s: %s — skipping", target.strftime("%Y-%m-%d"), e)
 
     log.info("No preferred slots found on any day (1–%d).", days_ahead)
+    return None, None, day8_slots
 
 
 def run_dry_run(session, token, sso_id, config):
@@ -578,7 +598,21 @@ def main():
     if args.slot:
         run_slot(session, token, sso_id, config, args.slot)
     elif args.auto:
-        run_auto(session, token, sso_id, config, fallback=args.fallback)
+        booked_date, booked_slot, day8_slots = run_auto(session, token, sso_id, config, fallback=args.fallback)
+        webhook = config.get("slack_webhook_url")
+        if webhook:
+            days_ahead = config.get("days_ahead", 8)
+            day8 = date.today() + timedelta(days=days_ahead)
+            if booked_slot is not None:
+                msg = (f"Booked: {booked_slot['time']} {booked_slot['resourceName']} "
+                       f"on {booked_date.strftime('%A %Y-%m-%d')}")
+            elif day8_slots:
+                msg = (f"No booking on {day8.strftime('%A %Y-%m-%d')}. "
+                       f"No preferred time available.\n"
+                       f"Available: {fmt_slots(day8_slots)}")
+            else:
+                msg = f"No booking — no courts available on {day8.strftime('%A %Y-%m-%d')}."
+            send_slack(webhook, msg)
     elif args.dry_run:
         run_dry_run(session, token, sso_id, config)
     else:
