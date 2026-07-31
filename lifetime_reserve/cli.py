@@ -10,7 +10,7 @@ import sys
 import time
 from datetime import date, datetime
 
-from lifetime_reserve.config import load_config, validate_config, ConfigError, LOG_DIR
+from lifetime_reserve.config import load_config, ConfigError, LOG_DIR
 from lifetime_reserve.api.client import LifetimeClient
 from lifetime_reserve.notify import notify
 from lifetime_reserve.reports import (
@@ -61,7 +61,7 @@ def login_with_retry(client, config, attempts=3):
     """Log in, retrying transient failures. Exits the process if all attempts fail."""
     for attempt in range(1, attempts + 1):
         try:
-            client.login(config["username"], config["password"])
+            client.login(config.username, config.password)
             return
         except Exception as e:
             log.error("Login attempt %d/%d failed: %s", attempt, attempts, e)
@@ -147,8 +147,7 @@ def main(argv=None):
     log.info("=" * 60)
     log.info("Run started — mode: %s", _mode_label(args))
     try:
-        config = load_config()
-        validate_config(config)
+        config = load_config()   # validates required keys, returns a typed Config
     except ConfigError as e:
         log.error("%s", e)
         sys.exit(1)

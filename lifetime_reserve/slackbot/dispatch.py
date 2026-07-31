@@ -27,8 +27,8 @@ def slack_post(text, thread_ts=None, channel=None):
     """Post a new message via bot API. Returns (ts, channel) or (None, None) on failure."""
     cfg = load_config()
     return notify.post_message(
-        cfg.get("slack_bot_token", ""),
-        channel or cfg.get("slack_channel", ""),
+        cfg.slack_bot_token,
+        channel or cfg.slack_channel,
         text,
         thread_ts=thread_ts,
     )
@@ -37,7 +37,7 @@ def slack_post(text, thread_ts=None, channel=None):
 def slack_update(ts, channel, text):
     """Edit an existing message in place via bot API."""
     cfg = load_config()
-    return notify.update_message(cfg.get("slack_bot_token", ""), channel, ts, text)
+    return notify.update_message(cfg.slack_bot_token, channel, ts, text)
 
 
 def run_script(args, label):

@@ -23,10 +23,10 @@ log = logging.getLogger(__name__)
 
 def _fetch_upcoming(client, config):
     """Fetch upcoming reservation labels for the horizon. Empty list on error / no member_ids."""
-    member_ids = config.get("member_ids", [])
+    member_ids = config.member_ids
     if not member_ids:
         return []
-    days_ahead = config.get("days_ahead", 8)
+    days_ahead = config.days_ahead
     today = date.today()
     try:
         _, labels = client.reserved_dates_and_labels(
@@ -76,10 +76,10 @@ def prompt_slot(slots):
 # ── Mode handlers ──────────────────────────────────────────────────────────────
 
 def run_interactive(client, config):
-    club_id = config.get("club_id", "36")
-    sport = config.get("sport", "Pickleball: Indoor")
-    duration = config.get("duration", 60)
-    days_ahead = config.get("days_ahead", 8)
+    club_id = config.club_id
+    sport = config.sport
+    duration = config.duration
+    days_ahead = config.days_ahead
 
     target_date = prompt_date(days_ahead)
     log.info("Searching courts for %s ...", target_date.strftime("%A %Y-%m-%d"))
@@ -118,9 +118,9 @@ def run_slot(client, config, slot_datetime_str):
 
     target_date = dt.date()
     api_time = to_api_time(dt.strftime("%H:%M"))
-    club_id = config.get("club_id", "36")
-    sport = config.get("sport", "Pickleball: Indoor")
-    duration = config.get("duration", 60)
+    club_id = config.club_id
+    sport = config.sport
+    duration = config.duration
 
     log.info("Searching courts for %s at %s ...", target_date.strftime("%A %Y-%m-%d"), api_time)
     try:
@@ -148,17 +148,17 @@ def run_slot(client, config, slot_datetime_str):
 
 
 def run_auto(client, config, fallback=False):
-    club_id = config.get("club_id", "36")
-    sport = config.get("sport", "Pickleball: Indoor")
-    duration = config.get("duration", 60)
-    days_ahead = config.get("days_ahead", 8)
-    preferred_times = config.get("preferred_times", [])
-    preferred_courts = config.get("preferred_courts", [])
-    retry_count = config.get("retry_count", 3)
-    retry_delay = config.get("retry_delay_seconds", 10)
+    club_id = config.club_id
+    sport = config.sport
+    duration = config.duration
+    days_ahead = config.days_ahead
+    preferred_times = config.preferred_times
+    preferred_courts = config.preferred_courts
+    retry_count = config.retry_count
+    retry_delay = config.retry_delay_seconds
 
     today = date.today()
-    member_ids = config.get("member_ids", [])
+    member_ids = config.member_ids
     reserved_dates = set()
     reservation_labels = []
 
@@ -309,16 +309,16 @@ def run_auto(client, config, fallback=False):
 
 
 def run_dry_run(client, config):
-    club_id = config.get("club_id", "36")
-    sport = config.get("sport", "Pickleball: Indoor")
-    duration = config.get("duration", 60)
-    days_ahead = config.get("days_ahead", 8)
-    preferred_times = config.get("preferred_times", [])
-    preferred_courts = config.get("preferred_courts", [])
+    club_id = config.club_id
+    sport = config.sport
+    duration = config.duration
+    days_ahead = config.days_ahead
+    preferred_times = config.preferred_times
+    preferred_courts = config.preferred_courts
 
     today = date.today()
 
-    member_ids = config.get("member_ids", [])
+    member_ids = config.member_ids
     if member_ids:
         reserved_dates, _ = client.reserved_dates_and_labels(
             member_ids,
@@ -363,11 +363,11 @@ def run_date(client, config, date_str):
         target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
         raise ValueError(f"Invalid date: {date_str}. Use YYYY-MM-DD.")
-    club_id = config.get("club_id", "36")
-    sport = config.get("sport", "Pickleball: Indoor")
-    duration = config.get("duration", 60)
-    preferred_times = config.get("preferred_times", [])
-    preferred_courts = config.get("preferred_courts", [])
+    club_id = config.club_id
+    sport = config.sport
+    duration = config.duration
+    preferred_times = config.preferred_times
+    preferred_courts = config.preferred_courts
 
     log.info("Searching %s ...", target_date.strftime("%A %Y-%m-%d"))
     try:
@@ -405,7 +405,7 @@ def run_cancel(client, config, date_str):
         target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
         raise ValueError(f"Invalid date: {date_str}. Use YYYY-MM-DD.")
-    member_ids = config.get("member_ids", [])
+    member_ids = config.member_ids
     if not member_ids:
         raise ConfigError("member_ids not configured — cannot look up reservation")
     reservations = client.get_reservations(member_ids, target_date, target_date)

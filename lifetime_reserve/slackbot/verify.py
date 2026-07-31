@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 
 def load_signing_secret():
     try:
-        return load_config().get("slack_signing_secret", "")
+        return load_config().slack_signing_secret
     except Exception:
         return ""
 

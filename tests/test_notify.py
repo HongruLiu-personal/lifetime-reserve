@@ -1,4 +1,5 @@
 import lifetime_reserve.notify as notify
+from lifetime_reserve.config import Config
 from tests.conftest import FakeResponse
 
 
@@ -56,8 +57,8 @@ def test_update_message_ok(monkeypatch):
 def test_notify_noop_without_token_or_channel(monkeypatch):
     called = {"n": 0}
     monkeypatch.setattr(notify, "post_message", lambda *a, **k: called.__setitem__("n", called["n"] + 1) or ("t", "c"))
-    assert notify.notify({}, "hi") == (None, None)          # no token/channel
-    assert notify.notify({"slack_bot_token": "t"}, "hi") == (None, None)  # no channel
+    assert notify.notify(Config.from_dict({}), "hi") == (None, None)          # no token/channel
+    assert notify.notify(Config.from_dict({"slack_bot_token": "t"}), "hi") == (None, None)  # no channel
     assert called["n"] == 0
 
 
@@ -67,7 +68,7 @@ def test_notify_posts_with_config(monkeypatch):
         seen.update(token=token, channel=channel, text=text)
         return "ts1", channel
     monkeypatch.setattr(notify, "post_message", fake_post)
-    cfg = {"slack_bot_token": "tok", "slack_channel": "C9"}
+    cfg = Config.from_dict({"slack_bot_token": "tok", "slack_channel": "C9"})
     ts, ch = notify.notify(cfg, "hello")
     assert (ts, ch) == ("ts1", "C9")
     assert seen == {"token": "tok", "channel": "C9", "text": "hello"}
@@ -77,5 +78,6 @@ def test_notify_channel_override(monkeypatch):
     seen = {}
     monkeypatch.setattr(notify, "post_message",
                         lambda t, c, x, thread_ts=None: seen.update(channel=c) or ("ts", c))
-    notify.notify({"slack_bot_token": "tok", "slack_channel": "C9"}, "hi", channel="COVERRIDE")
+    notify.notify(Config.from_dict({"slack_bot_token": "tok", "slack_channel": "C9"}),
+                  "hi", channel="COVERRIDE")
     assert seen["channel"] == "COVERRIDE"

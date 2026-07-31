@@ -6,7 +6,7 @@ from datetime import date, timedelta
 import pytest
 import requests
 
-from lifetime_reserve.config import ConfigError
+from lifetime_reserve.config import Config, ConfigError
 from lifetime_reserve import modes
 from lifetime_reserve.modes import run_auto, run_slot, run_date, run_cancel
 from tests.conftest import FakeClient, FakeResponse, make_slot, search_envelope
@@ -23,7 +23,7 @@ def cfg(**over):
     base = {"preferred_times": ["7:00 AM"], "preferred_courts": ["Court 3"],
             "retry_count": 2, "retry_delay_seconds": 0, "days_ahead": 8}
     base.update(over)
-    return base
+    return Config.from_dict(base)
 
 
 @pytest.fixture(autouse=True)
@@ -153,17 +153,17 @@ def test_run_date_bad_date_raises():
 
 def test_run_cancel_bad_date_raises():
     with pytest.raises(ValueError):
-        run_cancel(FakeClient(), {"member_ids": [1]}, "not-a-date")
+        run_cancel(FakeClient(), Config.from_dict({"member_ids": [1]}), "not-a-date")
 
 
 def test_run_cancel_missing_member_ids_raises_config_error():
     with pytest.raises(ConfigError):
-        run_cancel(FakeClient(), {}, "2026-08-10")
+        run_cancel(FakeClient(), Config.from_dict({}), "2026-08-10")
 
 
 def test_run_cancel_cancels_found_reservations():
     c = FakeClient(reservations=[{"attendee_id": "A1", "label": "Mon Aug 10"}])
-    td, cancelled, found = run_cancel(c, {"member_ids": [1]}, "2026-08-10")
+    td, cancelled, found = run_cancel(c, Config.from_dict({"member_ids": [1]}), "2026-08-10")
     assert cancelled == ["Mon Aug 10"]
     assert found == 1
     assert c.cancelled == ["A1"]

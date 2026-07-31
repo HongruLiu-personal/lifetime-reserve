@@ -60,8 +60,8 @@ def notify(config, text, channel=None, thread_ts=None):
 
     Replaces reserve.py's send_slack(). No-ops silently if token/channel absent.
     """
-    token = config.get("slack_bot_token", "")
-    ch = channel or config.get("slack_channel", "")
+    token = config.slack_bot_token
+    ch = channel or config.slack_channel
     if not token or not ch:
         return None, None
     ts, ch2 = post_message(token, ch, text, thread_ts=thread_ts)
