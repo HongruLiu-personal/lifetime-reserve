@@ -95,3 +95,22 @@ def run_and_report(args: list, response_url: str, label: str, verbose: bool = Fa
             log.info("fallback response_url: HTTP %s %s", r.status_code, r.text[:200])
         except Exception as e:
             log.error("Failed to post fallback result: %s", e)
+
+
+def run_and_report_threaded(args, label, verbose, channel, thread_ts):
+    """Events API flow: every message threads under the user's message (thread_ts).
+
+    Post "{label}..." as a thread reply we own, run the script, chat.update it with the
+    result, and (if verbose) post the full log as another reply in the same thread.
+    No response_url fallback — events have no response_url.
+    """
+    parent_ts, parent_channel = slack_post(f"{label}...", channel=channel, thread_ts=thread_ts)
+    details_text, all_lines = run_script(args, label)
+
+    if parent_ts:
+        slack_update(parent_ts, parent_channel, details_text)
+        if verbose and all_lines:
+            slack_post(truncate(f"*Full log:*\n```{chr(10).join(all_lines)}```"),
+                       channel=channel, thread_ts=thread_ts)
+    else:
+        log.error("Could not post threaded reply for %s (chat.postMessage failed)", label)

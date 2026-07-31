@@ -1,22 +1,28 @@
-"""Slack slash-command HTTP server.
+"""Slack HTTP server.
 
-Endpoints: POST /reserve, /cancel, /list. Verifies the Slack signature, parses the
-command, ACKs immediately, and dispatches the reserve.py subprocess on a worker thread.
-(The Events API /events endpoint is added in Phase 4.)
+Endpoints:
+  POST /reserve, /cancel, /list  — slash commands (form-encoded)
+  POST /events                   — Events API (JSON): app_mention + message.im,
+                                   with threaded replies under the user's message
+
+Verifies the Slack signature on every request, ACKs within Slack's 3s window, and
+dispatches the reserve.py subprocess on a worker thread.
 """
 
 import json
 import logging
 import os
 import re
-import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
-from lifetime_reserve.slackbot.verify import verify_slack
+from lifetime_reserve.config import load_config
+from lifetime_reserve.slackbot.verify import verify_slack, load_signing_secret
 from lifetime_reserve.slackbot.parsing import parse_date_token, parse_command_text
-from lifetime_reserve.slackbot.dispatch import run_and_report
+from lifetime_reserve.slackbot.dispatch import run_and_report, run_and_report_threaded
+from lifetime_reserve.slackbot.events import (
+    dedup_seen, should_process_event, handle_event)
 
 PORT = int(os.environ.get("PORT", "5000"))
 
@@ -35,6 +41,11 @@ class SlackHandler(BaseHTTPRequestHandler):
         sig = self.headers.get("X-Slack-Signature", "")
         if not verify_slack(body, ts, sig):
             self._send(403, {"error": "Invalid signature"})
+            return
+
+        # Events API is JSON, not form-encoded — route it before parse_qs.
+        if self.path == "/events":
+            self._handle_events(body)
             return
 
         params = {k: v[0] for k, v in parse_qs(body.decode()).items()}
@@ -86,6 +97,37 @@ class SlackHandler(BaseHTTPRequestHandler):
         else:
             self._send(404, {"error": "Not found"})
 
+    def _handle_events(self, body):
+        try:
+            payload = json.loads(body)
+        except Exception:
+            self._send(400, {"error": "invalid JSON"})
+            return
+
+        # One-time URL verification handshake when enabling Event Subscriptions.
+        if payload.get("type") == "url_verification":
+            self._send(200, {"challenge": payload.get("challenge", "")})
+            return
+
+        if payload.get("type") != "event_callback":
+            self._ack()
+            return
+
+        # ACK within Slack's 3s window BEFORE doing any work (Slack retries otherwise).
+        self._ack()
+
+        event_id = payload.get("event_id")
+        if not event_id or dedup_seen(event_id):
+            return
+        event = payload.get("event", {})
+        if not should_process_event(event):
+            return
+        threading.Thread(
+            target=handle_event,
+            args=(event, load_config(), run_and_report_threaded),
+            daemon=True,
+        ).start()
+
     def _ack(self):
         """Respond 200 with empty body — tells Slack we received the request, no visible reply."""
         self.send_response(200)
@@ -105,7 +147,11 @@ class SlackHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    log.info("Starting Slack command server on port %d", PORT)
+    if not load_signing_secret():
+        log.warning("SECURITY: slack_signing_secret is not set — /events and slash "
+                    "commands are UNAUTHENTICATED and will act on any POST. Set it "
+                    "before exposing this server.")
+    log.info("Starting Slack server (slash commands + /events) on port %d", PORT)
     ThreadingHTTPServer(("0.0.0.0", PORT), SlackHandler).serve_forever()
 
 
