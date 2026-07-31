@@ -79,3 +79,21 @@ def test_run_and_report_non_verbose_no_thread_post(monkeypatch):
 
     dispatch.run_and_report(["--auto"], "http://resp", "Auto", verbose=False)
     assert posts == [("Auto...", None)]   # only the parent, no thread reply
+
+
+def test_run_and_report_threaded_threads_under_user_message(monkeypatch):
+    # Events path: parent + verbose reply both go to the event channel and thread under
+    # the USER's message (thread_ts), NOT under the parent result ts.
+    posts = []
+    monkeypatch.setattr(dispatch, "slack_post",
+                        lambda text, thread_ts=None, channel=None: (posts.append((text, channel, thread_ts)) or ("pts", "C_EVENT")))
+    updates = []
+    monkeypatch.setattr(dispatch, "slack_update", lambda ts, ch, text: updates.append((ts, ch, text)))
+    monkeypatch.setattr(dispatch, "run_script", lambda args, label: ("RESULT", ["log1"]))
+
+    dispatch.run_and_report_threaded(["--list"], "Reservations", True,
+                                     channel="C_EVENT", thread_ts="user.ts")
+    assert posts[0] == ("Reservations...", "C_EVENT", "user.ts")   # parent in user thread
+    assert updates == [("pts", "C_EVENT", "RESULT")]
+    # verbose reply threads under user.ts (not the parent "pts")
+    assert any(c == "C_EVENT" and t == "user.ts" and "Full log" in text for text, c, t in posts)

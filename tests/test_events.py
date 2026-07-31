@@ -149,3 +149,20 @@ def test_handle_event_error_posts_message_and_skips_run_fn(monkeypatch):
     assert ran == []                       # run_fn NOT called on parse error
     assert "Could not parse" in posted["text"]
     assert posted["channel"] == "C9" and posted["thread_ts"] == "111.0"
+
+
+def test_handle_event_worker_guard_posts_apology_on_run_fn_error(monkeypatch):
+    # B2: an exception in the worker must not escape the daemon thread silently —
+    # it's logged and surfaced to the user as a threaded reply.
+    posted = {}
+    monkeypatch.setattr(events.notify, "notify",
+                        lambda cfg, text, channel=None, thread_ts=None: posted.update(
+                            text=text, channel=channel, thread_ts=thread_ts))
+
+    def boom(*a, **k):
+        raise RuntimeError("kaboom")
+
+    event = {"type": "app_mention", "text": "reserve", "ts": "111.0", "channel": "C9"}
+    handle_event(event, CONFIG, boom)      # must not raise
+    assert "went wrong" in posted["text"]
+    assert posted["channel"] == "C9" and posted["thread_ts"] == "111.0"

@@ -8,8 +8,11 @@ process working directory.
 """
 
 import json
+import logging
 from dataclasses import dataclass, field, fields
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # repo root
 CONFIG_FILE = BASE_DIR / "config.json"
@@ -45,6 +48,11 @@ class Config:
     @classmethod
     def from_dict(cls, d: dict) -> "Config":
         known = {f.name for f in fields(cls)}
+        unknown = set(d) - known
+        if unknown:
+            # A typo like "preferred_time" (missing s) would otherwise be silently
+            # ignored and fall back to a default — warn so it's noticed.
+            log.warning("Ignoring unknown config keys: %s", ", ".join(sorted(unknown)))
         return cls(**{k: v for k, v in d.items() if k in known})
 
 

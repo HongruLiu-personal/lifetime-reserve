@@ -58,17 +58,18 @@ def parse_args(argv=None):
 
 
 def login_with_retry(client, config, attempts=3):
-    """Log in, retrying transient failures. Exits the process if all attempts fail."""
+    """Log in, retrying transient failures. Raises RuntimeError if all attempts fail."""
+    last = None
     for attempt in range(1, attempts + 1):
         try:
             client.login(config.username, config.password)
             return
         except Exception as e:
+            last = e
             log.error("Login attempt %d/%d failed: %s", attempt, attempts, e)
-            if attempt == attempts:
-                log.error("All login attempts failed — exiting")
-                sys.exit(1)
-            time.sleep(2)
+            if attempt < attempts:
+                time.sleep(2)
+    raise RuntimeError(f"All {attempts} login attempts failed: {last}")
 
 
 def wait_until(hhmmss):
@@ -106,15 +107,15 @@ def dispatch(args, client, config):
     their own output, e.g. dry-run / interactive)."""
     if args.cancel:
         target_date, cancelled, found_count = modes.run_cancel(client, config, args.cancel)
-        upcoming = modes._fetch_upcoming(client, config)
+        upcoming = modes.fetch_upcoming(client, config)
         return build_cancel_report(target_date, cancelled, found_count, upcoming)
     if args.date:
         target_date, booked_slot, reason, slots = modes.run_date(client, config, args.date)
-        upcoming = modes._fetch_upcoming(client, config)
+        upcoming = modes.fetch_upcoming(client, config)
         return build_date_report(target_date, booked_slot, reason, slots, upcoming)
     if args.slot:
         dt, booked_slot, reason = modes.run_slot(client, config, args.slot)
-        upcoming = modes._fetch_upcoming(client, config)
+        upcoming = modes.fetch_upcoming(client, config)
         return build_slot_report(dt, booked_slot, reason, upcoming)
     if args.auto:
         result = modes.run_auto(client, config, fallback=args.fallback)
@@ -123,7 +124,7 @@ def dispatch(args, client, config):
             result.get("day8_slots", []), result.get("reservation_labels", []),
         )
     if args.list_reservations:
-        upcoming = modes._fetch_upcoming(client, config)
+        upcoming = modes.fetch_upcoming(client, config)
         return build_list_report(upcoming)
     if args.dry_run:
         modes.run_dry_run(client, config)
@@ -153,14 +154,21 @@ def main(argv=None):
         sys.exit(1)
 
     client = LifetimeClient()
-    login_with_retry(client, config)
-    wait_until(args.wait_until)
-
     try:
+        login_with_retry(client, config)
+        wait_until(args.wait_until)
         report = dispatch(args, client, config)
     except (ValueError, ConfigError) as e:
-        # Input-validation failures from the mode handlers.
+        # Input-validation failures (bad --slot/--date, missing member_ids) — no booking
+        # attempted; log and exit without alerting.
         log.error("%s", e)
+        sys.exit(1)
+    except Exception as e:
+        # Hard failure (login exhausted, unexpected error) — alert so a failed scheduled
+        # run isn't silent.
+        log.exception("Run failed: %s", e)
+        if not args.no_notify:
+            notify(config, f"*{_mode_label(args)} run failed*\n```{e}```")
         sys.exit(1)
 
     if report is not None:

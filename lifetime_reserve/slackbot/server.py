@@ -98,6 +98,12 @@ class SlackHandler(BaseHTTPRequestHandler):
             self._send(404, {"error": "Not found"})
 
     def _handle_events(self, body):
+        # /events triggers real bookings, so require a configured signing secret —
+        # fail closed rather than inherit verify_slack's empty-secret allow.
+        if not load_signing_secret():
+            log.error("/events rejected: slack_signing_secret not configured")
+            self._send(403, {"error": "events disabled: signing secret not configured"})
+            return
         try:
             payload = json.loads(body)
         except Exception:

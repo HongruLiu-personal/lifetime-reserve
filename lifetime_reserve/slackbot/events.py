@@ -84,11 +84,23 @@ def build_command(raw_text: str):
 
 def handle_event(event, config, run_fn):
     """Dispatch one event. `run_fn` is injected for testability (normally
-    dispatch.run_and_report_threaded). All replies thread under the user's message."""
-    channel = event["channel"]
-    thread_ts = event.get("thread_ts") or event["ts"]  # reply in existing thread if any
-    args, label, verbose = build_command(event.get("text", ""))
-    if args is None:
-        notify.notify(config, label, channel=channel, thread_ts=thread_ts)  # label = error
-        return
-    run_fn(args + ["--no-notify"], label, verbose, channel=channel, thread_ts=thread_ts)
+    dispatch.run_and_report_threaded). All replies thread under the user's message.
+
+    Runs on a daemon thread, so it owns an error boundary: any failure is logged and, if
+    possible, surfaced to the user as a threaded reply instead of dying silently.
+    """
+    channel = event.get("channel")
+    thread_ts = event.get("thread_ts") or event.get("ts")  # existing thread if any
+    try:
+        args, label, verbose = build_command(event.get("text", ""))
+        if args is None:
+            notify.notify(config, label, channel=channel, thread_ts=thread_ts)  # label = error
+            return
+        run_fn(args + ["--no-notify"], label, verbose, channel=channel, thread_ts=thread_ts)
+    except Exception as e:
+        log.exception("handle_event failed: %s", e)
+        try:
+            notify.notify(config, "Sorry — something went wrong handling that request.",
+                          channel=channel, thread_ts=thread_ts)
+        except Exception:
+            pass

@@ -41,6 +41,9 @@ def _isolate(monkeypatch):
     FakeThread.instances.clear()
     monkeypatch.setattr(srv.threading, "Thread", FakeThread)
     monkeypatch.setattr(srv, "load_config", lambda: CONFIG)
+    # B3 guard reads the signing secret; stub it so these tests don't depend on a real
+    # config.json (absent on CI → would otherwise 403 everything). B3's own test overrides.
+    monkeypatch.setattr(srv, "load_signing_secret", lambda: "sekret")
     yield
     events.RECENT_EVENT_IDS.clear()
 
@@ -86,3 +89,12 @@ def test_invalid_json_returns_400():
     h = FakeHandler()
     h._handle_events(b"not json{")
     assert h.sent == [(400, {"error": "invalid JSON"})]
+
+
+def test_events_fail_closed_without_signing_secret(monkeypatch):
+    # B3: /events must reject (not inherit verify_slack's empty-secret allow) when no
+    # signing secret is configured, since it triggers real bookings.
+    monkeypatch.setattr(srv, "load_signing_secret", lambda: "")
+    h = _events({"type": "url_verification", "challenge": "x"})
+    assert h.sent == [(403, {"error": "events disabled: signing secret not configured"})]
+    assert not FakeThread.instances

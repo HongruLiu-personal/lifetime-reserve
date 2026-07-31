@@ -60,3 +60,11 @@ def test_from_dict_ignores_unknown_keys():
     cfg = Config.from_dict({"username": "u", "unknown_key": "x"})
     assert cfg.username == "u"
     assert not hasattr(cfg, "unknown_key")
+
+
+def test_from_dict_warns_on_unknown_keys(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="lifetime_reserve.config"):
+        cfg = Config.from_dict({"username": "u", "preferred_time": ["7:00 AM"]})  # typo: missing s
+    assert "preferred_time" in caplog.text
+    assert cfg.preferred_times == []   # typo'd key ignored → falls back to default

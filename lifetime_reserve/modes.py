@@ -21,7 +21,7 @@ from lifetime_reserve.slots import (
 log = logging.getLogger(__name__)
 
 
-def _fetch_upcoming(client, config):
+def fetch_upcoming(client, config):
     """Fetch upcoming reservation labels for the horizon. Empty list on error / no member_ids."""
     member_ids = config.member_ids
     if not member_ids:

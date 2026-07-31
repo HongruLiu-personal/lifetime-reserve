@@ -72,20 +72,30 @@ def run_script(args, label):
     return truncate(f"*{label}*\n```{chr(10).join(summary_lines)}```"), all_lines
 
 
-def run_and_report(args: list, response_url: str, label: str, verbose: bool = False):
-    """Slash-command flow: post "{label}..." as a parent message we own, run the
-    script, then chat.update the parent with the result. Verbose posts the full log as
-    a thread reply. Falls back to response_url if the parent post fails."""
-    parent_ts, parent_channel = slack_post(f"{label}...")
-    details_text, all_lines = run_script(args, label)
+def _post_result(label, args, verbose, *, channel, thread_ts, verbose_thread_of, on_no_parent):
+    """Shared flow for both dispatch paths.
 
+    Post "{label}..." as a parent message we own, run the script, chat.update the parent
+    with the result, and (if verbose) post the full log as a reply. `verbose_thread_of`
+    selects the verbose reply's thread from the parent ts — slash threads under the
+    result, events under the user's message. `on_no_parent(details_text)` handles a
+    failed parent post.
+    """
+    parent_ts, parent_channel = slack_post(f"{label}...", channel=channel, thread_ts=thread_ts)
+    details_text, all_lines = run_script(args, label)
     if parent_ts:
         slack_update(parent_ts, parent_channel, details_text)
         if verbose and all_lines:
             slack_post(truncate(f"*Full log:*\n```{chr(10).join(all_lines)}```"),
-                       thread_ts=parent_ts)
+                       channel=channel, thread_ts=verbose_thread_of(parent_ts))
     else:
-        # Fallback: no parent ts (chat.postMessage failed) — post via response_url
+        on_no_parent(details_text)
+
+
+def run_and_report(args: list, response_url: str, label: str, verbose: bool = False):
+    """Slash-command flow: parent is a top-level bot message; verbose threads under the
+    result; a failed parent post falls back to response_url."""
+    def on_no_parent(details_text):
         try:
             r = requests.post(
                 response_url,
@@ -96,21 +106,15 @@ def run_and_report(args: list, response_url: str, label: str, verbose: bool = Fa
         except Exception as e:
             log.error("Failed to post fallback result: %s", e)
 
+    _post_result(label, args, verbose, channel=None, thread_ts=None,
+                 verbose_thread_of=lambda parent_ts: parent_ts, on_no_parent=on_no_parent)
+
 
 def run_and_report_threaded(args, label, verbose, channel, thread_ts):
-    """Events API flow: every message threads under the user's message (thread_ts).
-
-    Post "{label}..." as a thread reply we own, run the script, chat.update it with the
-    result, and (if verbose) post the full log as another reply in the same thread.
-    No response_url fallback — events have no response_url.
-    """
-    parent_ts, parent_channel = slack_post(f"{label}...", channel=channel, thread_ts=thread_ts)
-    details_text, all_lines = run_script(args, label)
-
-    if parent_ts:
-        slack_update(parent_ts, parent_channel, details_text)
-        if verbose and all_lines:
-            slack_post(truncate(f"*Full log:*\n```{chr(10).join(all_lines)}```"),
-                       channel=channel, thread_ts=thread_ts)
-    else:
+    """Events API flow: everything threads under the user's message (thread_ts); no
+    response_url fallback."""
+    def on_no_parent(details_text):
         log.error("Could not post threaded reply for %s (chat.postMessage failed)", label)
+
+    _post_result(label, args, verbose, channel=channel, thread_ts=thread_ts,
+                 verbose_thread_of=lambda parent_ts: thread_ts, on_no_parent=on_no_parent)
