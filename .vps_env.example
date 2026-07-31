@@ -1,0 +1,6 @@
+# Copy to .vps_env (gitignored) and fill in your VPS connection details.
+# .vps_env is sourced by check_vps_log.sh.
+
+VPS_HOST="root@YOUR_VPS_IP"
+VPS_SSH_KEY="$HOME/.ssh/your_ssh_key"      # optional; omit to use default SSH key
+VPS_LOG_DIR="/root/lifetime-reserve/logs"  # optional; this is the default

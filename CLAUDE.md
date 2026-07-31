@@ -11,6 +11,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 .venv/bin/python reserve.py --auto --wait-until 09:00:00       # login early, book at 9AM sharp
 .venv/bin/python reserve.py --dry-run                          # show available slots, no booking
 .venv/bin/python reserve.py --slot "2026-03-16 04:30"          # book a specific slot directly (24h)
+.venv/bin/python reserve.py --cancel 2026-08-03                # cancel the reservation on a date
+.venv/bin/python reserve.py --list                            # list current upcoming reservations
 ```
 
 ## Architecture
@@ -53,6 +55,26 @@ Every API request requires the `ocp-apim-subscription-key` header (hardcoded) pl
 | `member_ids` | Household member IDs for reservation lookup (find in DevTools network tab on the reservations page) |
 | `retry_count` | Number of attempts for day 8 |
 | `retry_delay_seconds` | Wait between day-8 retries |
+
+## Syncing code to the VPS
+
+**Always sync via git — never `scp`.** Push local changes to `origin/main`, then `git pull` on the VPS. This keeps a single source of truth and an auditable history, and avoids drift between machines. (`scp` was used previously only because `main` was branch-protected on the remote; it no longer is.)
+
+```bash
+# Local
+git add -p && git commit -m "..." && git push
+
+# On the VPS
+cd /root/lifetime-reserve && git pull
+```
+
+**Never commit sensitive info.** Secrets and machine-specific details stay out of git and are delivered out-of-band (copied manually / stored in a secrets manager). Gitignored, never pushed:
+
+- `config.json` — Lifetime credentials, Slack bot token, signing secret
+- `.vps_env` — VPS host IP and SSH key path (see `.vps_env.example` for the template; `check_vps_log.sh` sources it)
+- `.claude/settings.local.json` — personal Claude Code permissions
+
+Before committing, scan the diff for tokens, passwords, keys, host IPs, and SSH details. If something sensitive was already pushed, **rotate it** rather than relying on a history rewrite — on a public repo, rewriting history does not truly un-publish (caches, forks, commits reachable by SHA remain).
 
 ## Scheduling options
 

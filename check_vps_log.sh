@@ -1,7 +1,17 @@
 #!/bin/bash
 
-SSH="ssh -i ~/.ssh/hetzner_lifetime_reserve root@204.168.135.198"
-LOG_DIR="/root/lifetime-reserve/logs"
+# Connection details are kept out of git. Provide them via a local .vps_env
+# file (see .vps_env.example) or via the VPS_HOST / VPS_SSH_KEY env vars.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$SCRIPT_DIR/.vps_env" ] && source "$SCRIPT_DIR/.vps_env"
+
+if [ -z "$VPS_HOST" ]; then
+  echo "Error: VPS_HOST is not set. Create $SCRIPT_DIR/.vps_env (see .vps_env.example)" >&2
+  exit 1
+fi
+
+SSH="ssh${VPS_SSH_KEY:+ -i $VPS_SSH_KEY} $VPS_HOST"
+LOG_DIR="${VPS_LOG_DIR:-/root/lifetime-reserve/logs}"
 
 case "${1:-today}" in
   today)

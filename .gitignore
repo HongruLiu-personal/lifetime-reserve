@@ -2,3 +2,15 @@
 config.json
 reserve.log
 logs/
+__pycache__/
+*.pyc
+
+# Personal/local Claude Code settings (SSH key names, host IPs)
+.claude/settings.local.json
+
+# VPS connection details (host IP, SSH key) — see .vps_env.example
+.vps_env
+
+# Local research/planning notes (kept off git)
+ARCHITECTURE.md
+SLACK_BOT_MIGRATION.md

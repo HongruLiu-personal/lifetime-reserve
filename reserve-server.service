@@ -1,0 +1,15 @@
+[Unit]
+Description=Lifetime Reserve Slack Command Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/lifetime-reserve
+ExecStart=/usr/bin/python3 /root/lifetime-reserve/server.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
