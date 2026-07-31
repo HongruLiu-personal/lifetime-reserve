@@ -68,11 +68,17 @@ git add -p && git commit -m "..." && git push
 cd /root/lifetime-reserve && git pull
 ```
 
-**Never commit sensitive info.** Secrets and machine-specific details stay out of git and are delivered out-of-band (copied manually / stored in a secrets manager). Gitignored, never pushed:
+**Never commit sensitive info.** Secrets and machine-specific details stay out of git and are delivered out-of-band via `scp`. Gitignored, never pushed:
 
 - `config.json` — Lifetime credentials, Slack bot token, signing secret
-- `.vps_env` — VPS host IP and SSH key path (see `.vps_env.example` for the template; `check_vps_log.sh` sources it)
+- `.vps_env` — VPS host IP and SSH key path (see `.vps_env.example` for the template; `check_vps_log.sh` sources it — used locally only, not needed on the VPS)
 - `.claude/settings.local.json` — personal Claude Code permissions
+
+Because these are gitignored, `git pull` on the VPS will **not** deliver them. When syncing, `scp` any changed config/secret files separately, e.g.:
+
+```bash
+scp -i ~/.ssh/hetzner_lifetime_reserve config.json root@<VPS_IP>:/root/lifetime-reserve/config.json
+```
 
 Before committing, scan the diff for tokens, passwords, keys, host IPs, and SSH details. If something sensitive was already pushed, **rotate it** rather than relying on a history rewrite — on a public repo, rewriting history does not truly un-publish (caches, forks, commits reachable by SHA remain).
 
