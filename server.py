@@ -31,6 +31,10 @@ from urllib.parse import parse_qs
 
 import requests
 
+from lifetime_reserve.slackbot.parsing import parse_date_token, parse_command_text
+from lifetime_reserve.slackbot.logparse import (
+    SUMMARY_KEYWORDS, extract_report, extract_log_lines, truncate)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 SCRIPT = os.path.join(BASE_DIR, "reserve.py")
@@ -102,114 +106,6 @@ def verify_slack(body: bytes, timestamp: str, signature: str) -> bool:
         return False
 
 
-SUMMARY_KEYWORDS = ("Confirmed:", "Cancelled", "No courts", "No preferred",
-                    "No reservation", "No booking", "ERROR", "failed")
-
-REPORT_START = "<<<REPORT>>>"
-REPORT_END = "<<<ENDREPORT>>>"
-
-
-def extract_report(raw: str) -> str | None:
-    """Extract the reserve.py report between markers. Returns None if not found."""
-    start = raw.find(REPORT_START)
-    end = raw.find(REPORT_END)
-    if start == -1 or end == -1 or end < start:
-        return None
-    return raw[start + len(REPORT_START):end].strip()
-
-
-WEEKDAY_MAP = {
-    "mon": 0, "monday": 0,
-    "tue": 1, "tuesday": 1,
-    "wed": 2, "wednesday": 2,
-    "thu": 3, "thursday": 3,
-    "fri": 4, "friday": 4,
-    "sat": 5, "saturday": 5,
-    "sun": 6, "sunday": 6,
-}
-WEEKDAY_PATTERN = re.compile(
-    r"\b(monday|mon|tuesday|tue|wednesday|wed|thursday|thu|friday|fri|saturday|sat|sunday|sun)\b",
-    re.IGNORECASE,
-)
-
-
-def parse_date_token(text):
-    """Return a date parsed from `text`: either YYYY-MM-DD or a weekday name.
-    Same-weekday-as-today rolls forward 7 days (since same-day booking isn't allowed)."""
-    m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
-    if m:
-        try:
-            return datetime.strptime(m.group(1), "%Y-%m-%d").date()
-        except ValueError:
-            pass
-    m = WEEKDAY_PATTERN.search(text)
-    if m:
-        target_wd = WEEKDAY_MAP[m.group(1).lower()]
-        today = date.today()
-        delta = (target_wd - today.weekday()) % 7
-        if delta == 0:
-            delta = 7
-        return today + timedelta(days=delta)
-    return None
-
-
-def parse_command_text(text):
-    """Parse slash command text into (args, label, verbose).
-
-    Append 'verbose' to the command to see full log output.
-    Date can be YYYY-MM-DD or a weekday name (Mon, Tuesday, etc.).
-    Returns (None, error_message, False) on parse failure.
-    """
-    text = text.strip()
-    verbose = bool(re.search(r"\bverbose\b", text, re.IGNORECASE))
-    text = re.sub(r"\bverbose\b", "", text, flags=re.IGNORECASE).strip()
-
-    if not text:
-        return ["--auto"], "Auto-reserve (day 8)", verbose
-
-    target_date = parse_date_token(text)
-    date_str = target_date.strftime("%Y-%m-%d") if target_date else None
-    date_label = target_date.strftime("%a %b %-d") if target_date else None
-
-    time_m = re.search(r"\b(\d{1,2}:\d{2}(?:\s*[AaPp][Mm])?)\b", text)
-    time_str = None
-    if time_m:
-        raw = time_m.group(1).strip()
-        try:
-            fmt = "%I:%M%p" if re.search(r"[AaPp][Mm]", raw) else "%H:%M"
-            time_str = datetime.strptime(raw.upper().replace(" ", ""), fmt).strftime("%H:%M")
-        except ValueError:
-            pass
-
-    if date_str and time_str:
-        return ["--slot", f"{date_str} {time_str}"], f"Book {date_label} at {time_str}", verbose
-    if date_str:
-        return ["--date", date_str], f"Book best slot on {date_label}", verbose
-    return None, (
-        f'Could not parse: `{text}`\n'
-        "Usage: `/reserve`, `/reserve <date>`, or `/reserve <date> HH:MM`\n"
-        "Date can be `YYYY-MM-DD` or a weekday name (`Mon`, `Tuesday`, ...)"
-    ), False
-
-
-def _truncate(text: str, limit: int = 3800) -> str:
-    return text if len(text) <= limit else text[:limit] + "\n…```"
-
-
-def _extract_log_lines(raw: str) -> list:
-    """Extract log lines (INFO/WARNING/ERROR), stripping the level prefix and framing."""
-    lines = []
-    for line in raw.splitlines():
-        for lvl in ("INFO ", "WARNING ", "ERROR "):
-            if lvl in line:
-                lines.append(line.split(lvl, 1)[-1].strip())
-                break
-    return [l for l in lines
-            if not l.startswith("===")
-            and not l.startswith("Run started")
-            and REPORT_START not in l and REPORT_END not in l]
-
-
 def run_and_report(args: list, response_url: str, label: str, verbose: bool = False):
     """Single-parent thread flow:
       - HTTP response has already posted "{label}..." (loading indicator, stays as-is).
@@ -235,16 +131,16 @@ def run_and_report(args: list, response_url: str, label: str, verbose: bool = Fa
             timeout=120,
         )
         raw = proc.stderr + proc.stdout
-        all_lines = _extract_log_lines(raw)
+        all_lines = extract_log_lines(raw)
 
         report = extract_report(raw)
         if report:
-            details_text = _truncate(report)
+            details_text = truncate(report)
         else:
             summary_lines = [l for l in all_lines if any(k in l for k in SUMMARY_KEYWORDS)]
             if not summary_lines:
                 summary_lines = all_lines[-3:] if all_lines else ["(no output)"]
-            details_text = _truncate(f"*{label}*\n```{chr(10).join(summary_lines)}```")
+            details_text = truncate(f"*{label}*\n```{chr(10).join(summary_lines)}```")
     except subprocess.TimeoutExpired:
         details_text = f"*{label}*\nScript timed out after 120s"
     except Exception as e:
@@ -253,7 +149,7 @@ def run_and_report(args: list, response_url: str, label: str, verbose: bool = Fa
     if parent_ts:
         slack_update(parent_ts, parent_channel, details_text)
         if verbose and all_lines:
-            slack_post(_truncate(f"*Full log:*\n```{chr(10).join(all_lines)}```"),
+            slack_post(truncate(f"*Full log:*\n```{chr(10).join(all_lines)}```"),
                        thread_ts=parent_ts)
     else:
         # Fallback: no parent ts (chat.postMessage failed) — post via response_url

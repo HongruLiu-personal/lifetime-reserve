@@ -27,6 +27,12 @@ from pathlib import Path
 
 import requests
 
+from lifetime_reserve.slots import (
+    collect_slots, to_api_time, auto_pick, pick_by_time, fmt_slots)
+from lifetime_reserve.reports import (
+    emit_report, build_auto_report, build_slot_report, build_date_report,
+    build_list_report, build_cancel_report)
+
 CONFIG_FILE = "config.json"
 API_BASE = "https://api.lifetimefitness.com"
 APIM_KEY = "924c03ce573d473793e184219a6a19bd"
@@ -222,63 +228,8 @@ def book_court(session, token, sso_id, resource_id, start, duration):
     return booking
 
 
-# ── Slot utilities ─────────────────────────────────────────────────────────────
-
-def collect_slots(search_result):
-    slots = []
-    for part in search_result.get("results", {}).get("dayParts", []):
-        for slot in part.get("availableTimes", []):
-            slot["_part"] = part["name"]
-            slots.append(slot)
-    return slots
-
-
-def to_api_time(hhmm_24h):
-    """Convert '04:30' (24h) to '4:30 AM' (API time format)."""
-    return datetime.strptime(hhmm_24h, "%H:%M").strftime("%-I:%M %p")
-
-
-def auto_pick(slots, preferred_times, preferred_courts):
-    """Pick best slot by preferred time then preferred court. Returns None if no match."""
-    def court_rank(slot):
-        name = slot.get("resourceName", "")
-        try:
-            return preferred_courts.index(name)
-        except ValueError:
-            return len(preferred_courts)
-
-    for pref_time in preferred_times:
-        candidates = [s for s in slots if s["time"] == pref_time]
-        if candidates:
-            candidates.sort(key=court_rank)
-            return candidates[0]
-
-    log.warning("No slots available at preferred times — skipping booking")
-    return None
-
-
-def pick_by_time(slots, api_time):
-    """Return first available slot matching api_time (e.g. '4:30 AM')."""
-    return next((s for s in slots if s["time"] == api_time), None)
-
-
-def fmt_slots(slots):
-    return ", ".join(f"{s['time']} {s['resourceName']}" for s in slots)
-
-
-# ── Report emission ────────────────────────────────────────────────────────────
-# server.py extracts text between these markers from stdout to build the Slack
-# details message. Any run mode that completes calls emit_report() with a fully
-# formatted Slack-flavored report.
-
-REPORT_START = "<<<REPORT>>>"
-REPORT_END = "<<<ENDREPORT>>>"
-
-
-def _upcoming_block(labels):
-    if not labels:
-        return "*Upcoming reservations:*\n• (none)"
-    return "*Upcoming reservations:*\n" + "\n".join(f"• {l}" for l in labels)
+# ── Slot utilities and report builders live in lifetime_reserve.slots / .reports
+# (imported at the top). _fetch_upcoming stays here because it does I/O.
 
 
 def _fetch_upcoming(session, token, sso_id, config):
@@ -298,80 +249,6 @@ def _fetch_upcoming(session, token, sso_id, config):
     except Exception as e:
         log.warning("Could not fetch upcoming reservations: %s", e)
         return []
-
-
-def emit_report(text):
-    """Print report to stdout with markers for server.py to extract."""
-    print(f"\n{REPORT_START}\n{text}\n{REPORT_END}\n", flush=True)
-
-
-def build_auto_report(status, target_date, booked_slot, day8_slots, reservation_labels):
-    """status is one of: booked | already_reserved | no_courts | no_preferred | booking_failed."""
-    today = date.today()
-    date_label = target_date.strftime("%a %b %-d")
-    parts = [f"*Auto-reserve · {today.strftime('%a %b %-d')}*", ""]
-    if status == "booked":
-        parts.append(f"*Booked:* {booked_slot['time']} {booked_slot['resourceName']} on {date_label}")
-    elif status == "already_reserved":
-        parts.append(f"*No booking on {date_label}* — already reserved that day")
-    elif status == "no_courts":
-        parts.append(f"*No booking on {date_label}* — no courts available")
-    elif status == "no_preferred":
-        parts.append(f"*No booking on {date_label}* — no preferred time available")
-        if day8_slots:
-            parts.append(f"Available: {fmt_slots(day8_slots)}")
-    elif status == "booking_failed":
-        parts.append(f"*No booking on {date_label}* — all retries failed (slot taken or API error)")
-    parts += ["", _upcoming_block(reservation_labels)]
-    return "\n".join(parts)
-
-
-def build_slot_report(dt, booked_slot, reason, reservation_labels):
-    today = date.today()
-    date_label = dt.strftime("%a %b %-d")
-    parts = [f"*Book slot · {today.strftime('%a %b %-d')}*", ""]
-    if booked_slot is not None:
-        parts.append(f"*Booked:* {booked_slot['time']} {booked_slot['resourceName']} on {date_label}")
-    else:
-        parts.append(f"*Failed to book {date_label} at {dt.strftime('%-I:%M %p')}* — {reason}")
-    parts += ["", _upcoming_block(reservation_labels)]
-    return "\n".join(parts)
-
-
-def build_date_report(target_date, booked_slot, reason, day_slots, reservation_labels):
-    today = date.today()
-    date_label = target_date.strftime("%a %b %-d")
-    parts = [f"*Book {date_label} · {today.strftime('%a %b %-d')}*", ""]
-    if booked_slot is not None:
-        parts.append(f"*Booked:* {booked_slot['time']} {booked_slot['resourceName']} on {date_label}")
-    else:
-        parts.append(f"*No booking on {date_label}* — {reason}")
-        if day_slots:
-            parts.append(f"Available: {fmt_slots(day_slots)}")
-    parts += ["", _upcoming_block(reservation_labels)]
-    return "\n".join(parts)
-
-
-def build_list_report(reservation_labels):
-    today = date.today()
-    parts = [f"*Reservations · {today.strftime('%a %b %-d')}*", ""]
-    parts.append(_upcoming_block(reservation_labels))
-    return "\n".join(parts)
-
-
-def build_cancel_report(target_date, cancelled_labels, found_count, reservation_labels):
-    today = date.today()
-    date_label = target_date.strftime("%a %b %-d")
-    parts = [f"*Cancel · {today.strftime('%a %b %-d')}*", ""]
-    if cancelled_labels:
-        parts.append(f"*Cancelled on {date_label}:*")
-        parts.extend(f"• {l}" for l in cancelled_labels)
-    elif found_count:
-        parts.append(f"*Cancel failed on {date_label}* — reservation found but the API rejected the request (see logs)")
-    else:
-        parts.append(f"*No reservation to cancel on {date_label}*")
-    parts += ["", _upcoming_block(reservation_labels)]
-    return "\n".join(parts)
 
 
 def send_slack(config, text):
