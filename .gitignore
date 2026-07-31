@@ -14,3 +14,8 @@ __pycache__/
 # Local research/planning notes (kept off git)
 ARCHITECTURE.md
 SLACK_BOT_MIGRATION.md
+MODULARIZATION_AND_SLACKBOT_PLAN.md
+
+# Test artifacts
+.pytest_cache/
+.coverage

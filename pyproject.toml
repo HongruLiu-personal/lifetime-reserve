@@ -1,0 +1,5 @@
+# Test configuration only. This is NOT an installable package (no [build-system]);
+# reserve.py / server.py run directly from the repo root with `requests` on the path.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
