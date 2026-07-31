@@ -48,6 +48,19 @@ def test_build_command_cancel_bad_date_is_error():
     assert "Usage" in err
 
 
+def test_build_command_list():
+    args, label, verbose = build_command("list")
+    assert args == ["--list"]
+    assert label == "Reservations"
+    assert verbose is False
+
+
+def test_build_command_list_verbose_and_mention():
+    args, label, verbose = build_command("<@U0BOT> list verbose")
+    assert args == ["--list"]
+    assert verbose is True
+
+
 def test_build_command_unparseable_is_error():
     args, err, verbose = build_command("zzzz")
     assert args is None

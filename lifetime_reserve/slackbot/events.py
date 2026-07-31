@@ -55,11 +55,13 @@ def should_process_event(event: dict) -> bool:
 def build_command(raw_text: str):
     """Map event text → (args, label, verbose), or (None, error_msg, False) on failure.
 
-    First word `cancel` → a cancel command; otherwise a leading `reserve` is stripped
-    and the remainder is parsed like a slash command.
+    First word decides the command: `cancel` → cancel, `list` → list; otherwise a
+    leading `reserve` is stripped and the remainder is parsed like a slash command.
     """
     text = strip_mention(raw_text).strip()
-    if text.lower().startswith("cancel"):
+    lower = text.lower()
+
+    if lower.startswith("cancel"):
         rest = text[len("cancel"):].strip()
         verbose = bool(re.search(r"\bverbose\b", rest, re.IGNORECASE))
         rest = re.sub(r"\bverbose\b", "", rest, flags=re.IGNORECASE).strip()
@@ -70,6 +72,11 @@ def build_command(raw_text: str):
         date_str = target_date.strftime("%Y-%m-%d")
         label = f"Cancel {target_date.strftime('%a %b %-d')}"
         return ["--cancel", date_str], label, verbose
+
+    if lower.startswith("list"):
+        rest = text[len("list"):]
+        verbose = bool(re.search(r"\bverbose\b", rest, re.IGNORECASE))
+        return ["--list"], "Reservations", verbose
 
     body = re.sub(r"^\s*reserve\b", "", text, flags=re.IGNORECASE).strip()
     return parse_command_text(body)
