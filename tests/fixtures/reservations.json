@@ -1,0 +1,90 @@
+{
+  "results": [
+    {
+      "start": "2026-07-31T07:00:00-04:00",
+      "regId": "reg-1",
+      "location": "Indoor Pickleball Court 3, Fairfax",
+      "registration": { "registeredMembers": [] }
+    },
+    {
+      "start": "2026-08-04T07:00:00-04:00",
+      "regId": "reg-2",
+      "location": "Indoor Pickleball Court 1, Fairfax",
+      "registration": {
+        "registeredMembers": [
+          {
+            "attendeeId": "att-2",
+            "cancelCtas": [
+              { "method": "online", "registrationId": "cancel-2" },
+              { "method": "phone", "registrationId": null }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "start": "2026-08-05T07:00:00-04:00",
+      "regId": "reg-3",
+      "location": "Indoor Pickleball Court 3, Fairfax",
+      "registration": {
+        "registeredMembers": [
+          {
+            "attendeeId": "att-3",
+            "cancelCtas": [
+              { "method": "online", "registrationId": "cancel-3" },
+              { "method": "phone", "registrationId": null }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "start": "2026-08-06T07:00:00-04:00",
+      "regId": "reg-4",
+      "location": "Indoor Pickleball Court 3, Fairfax",
+      "registration": {
+        "registeredMembers": [
+          {
+            "attendeeId": "att-4",
+            "cancelCtas": [
+              { "method": "online", "registrationId": "cancel-4" },
+              { "method": "phone", "registrationId": null }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "start": "2026-08-07T07:00:00-04:00",
+      "regId": "reg-5",
+      "location": "Indoor Pickleball Court 3, Fairfax",
+      "registration": {
+        "registeredMembers": [
+          {
+            "attendeeId": "att-5",
+            "cancelCtas": [
+              { "method": "online", "registrationId": "cancel-5" },
+              { "method": "phone", "registrationId": null }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "start": "2026-08-08T07:00:00-04:00",
+      "regId": "reg-6",
+      "location": "Indoor Pickleball Court 3, Fairfax",
+      "registration": {
+        "registeredMembers": [
+          {
+            "attendeeId": "att-6",
+            "cancelCtas": [
+              { "method": "online", "registrationId": "cancel-6" },
+              { "method": "phone", "registrationId": null }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

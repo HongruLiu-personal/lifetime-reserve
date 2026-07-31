@@ -1,10 +1,21 @@
 """Shared pytest fixtures and fakes.
 
 `FakeResponse` / `FakeSession` stand in for `requests` so the API client can be tested
-with no network. `FakeClient` (Phase 3) drives the mode handlers.
+with no network. `FakeClient` (Phase 3) drives the mode handlers. `load_fixture` reads
+the captured+scrubbed API payloads in tests/fixtures/.
 """
 
+import json
+import pathlib
+
 import requests
+
+FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
+
+
+def load_fixture(name):
+    """Load a scrubbed real API payload from tests/fixtures/."""
+    return json.loads((FIXTURES_DIR / name).read_text())
 
 
 class FakeResponse:

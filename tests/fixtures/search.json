@@ -1,0 +1,36 @@
+{
+  "results": {
+    "dayParts": [
+      {
+        "name": "Morning",
+        "availableTimes": [
+          { "time": "5:00 AM", "resourceName": "Court 1", "resourceId": "res-1", "start": "2026-08-08T05:00:00-04:00" },
+          { "time": "5:00 AM", "resourceName": "Court 2", "resourceId": "res-2", "start": "2026-08-08T05:00:00-04:00" },
+          { "time": "5:00 AM", "resourceName": "Court 3", "resourceId": "res-3", "start": "2026-08-08T05:00:00-04:00" },
+          { "time": "5:30 AM", "resourceName": "Court 1", "resourceId": "res-4", "start": "2026-08-08T05:30:00-04:00" },
+          { "time": "5:30 AM", "resourceName": "Court 2", "resourceId": "res-5", "start": "2026-08-08T05:30:00-04:00" },
+          { "time": "5:30 AM", "resourceName": "Court 3", "resourceId": "res-6", "start": "2026-08-08T05:30:00-04:00" },
+          { "time": "6:00 AM", "resourceName": "Court 1", "resourceId": "res-7", "start": "2026-08-08T06:00:00-04:00" },
+          { "time": "6:00 AM", "resourceName": "Court 3", "resourceId": "res-8", "start": "2026-08-08T06:00:00-04:00" },
+          { "time": "8:00 AM", "resourceName": "Court 3", "resourceId": "res-9", "start": "2026-08-08T08:00:00-04:00" }
+        ]
+      },
+      {
+        "name": "Evening",
+        "availableTimes": [
+          { "time": "5:00 PM", "resourceName": "Court 3", "resourceId": "res-10", "start": "2026-08-08T17:00:00-04:00" },
+          { "time": "5:30 PM", "resourceName": "Court 3", "resourceId": "res-11", "start": "2026-08-08T17:30:00-04:00" },
+          { "time": "8:00 PM", "resourceName": "Court 1", "resourceId": "res-12", "start": "2026-08-08T20:00:00-04:00" },
+          { "time": "8:00 PM", "resourceName": "Court 2", "resourceId": "res-13", "start": "2026-08-08T20:00:00-04:00" },
+          { "time": "8:00 PM", "resourceName": "Court 3", "resourceId": "res-14", "start": "2026-08-08T20:00:00-04:00" },
+          { "time": "8:30 PM", "resourceName": "Court 1", "resourceId": "res-15", "start": "2026-08-08T20:30:00-04:00" },
+          { "time": "8:30 PM", "resourceName": "Court 2", "resourceId": "res-16", "start": "2026-08-08T20:30:00-04:00" },
+          { "time": "8:30 PM", "resourceName": "Court 3", "resourceId": "res-17", "start": "2026-08-08T20:30:00-04:00" },
+          { "time": "9:00 PM", "resourceName": "Court 1", "resourceId": "res-18", "start": "2026-08-08T21:00:00-04:00" },
+          { "time": "9:00 PM", "resourceName": "Court 2", "resourceId": "res-19", "start": "2026-08-08T21:00:00-04:00" },
+          { "time": "9:00 PM", "resourceName": "Court 3", "resourceId": "res-20", "start": "2026-08-08T21:00:00-04:00" }
+        ]
+      }
+    ]
+  }
+}

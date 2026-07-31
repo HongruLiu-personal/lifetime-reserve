@@ -1,0 +1,6 @@
+{
+  "status": "0",
+  "username": "user@example.com",
+  "token": "REDACTED_JWE",
+  "ssoId": "sso-test"
+}
