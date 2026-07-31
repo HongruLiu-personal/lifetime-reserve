@@ -17,28 +17,21 @@ Usage:
 """
 
 import argparse
-import json
 import logging
-import os
 import sys
 import time
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 import requests
 
+from lifetime_reserve.config import load_config, validate_config, ConfigError, LOG_DIR
+from lifetime_reserve.api.client import LifetimeClient
+from lifetime_reserve.notify import notify
 from lifetime_reserve.slots import (
     collect_slots, to_api_time, auto_pick, pick_by_time, fmt_slots)
 from lifetime_reserve.reports import (
     emit_report, build_auto_report, build_slot_report, build_date_report,
     build_list_report, build_cancel_report)
-
-CONFIG_FILE = "config.json"
-API_BASE = "https://api.lifetimefitness.com"
-APIM_KEY = "924c03ce573d473793e184219a6a19bd"
-ORIGIN = "https://my.lifetime.life"
-HTTP_TIMEOUT = (5, 10)  # (connect, read) in seconds
-LOG_DIR = Path(__file__).resolve().parent / "logs"
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, handlers=[logging.StreamHandler()])
@@ -55,184 +48,7 @@ def setup_file_logging():
     logging.getLogger().addHandler(fh)
 
 
-# ── Configuration ──────────────────────────────────────────────────────────────
-
-def load_config():
-    with open(CONFIG_FILE) as f:
-        return json.load(f)
-
-
-def validate_config(config):
-    required = ["username", "password", "club_id", "sport", "duration", "days_ahead"]
-    missing = [k for k in required if k not in config]
-    if missing:
-        log.error("Missing required config keys: %s", ", ".join(missing))
-        sys.exit(1)
-
-
-# ── HTTP session ───────────────────────────────────────────────────────────────
-
-def make_session():
-    s = requests.Session()
-    s.headers.update({
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "origin": ORIGIN,
-        "ocp-apim-subscription-key": APIM_KEY,
-    })
-    return s
-
-
-# ── API calls ──────────────────────────────────────────────────────────────────
-
-def login(session, username, password):
-    resp = session.post(
-        f"{API_BASE}/auth/v2/login",
-        json={"username": username, "password": password},
-        headers={"content-type": "application/json; charset=UTF-8"},
-        timeout=HTTP_TIMEOUT,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("status") != "0":
-        raise RuntimeError(f"Login failed: {data}")
-    log.info("Logged in as %s", data["username"])
-    return data["token"], data["ssoId"]
-
-
-def auth_headers(token, sso_id):
-    return {"x-ltf-jwe": token, "x-ltf-ssoid": sso_id}
-
-
-def search_courts(session, token, sso_id, club_id, sport, target_date, duration):
-    resp = session.get(
-        f"{API_BASE}/ux/web-schedules/v2/resources/booking/search",
-        params={
-            "homeClub": club_id,
-            "clubId": club_id,
-            "sport": sport,
-            "date": target_date.strftime("%Y-%m-%d"),
-            "startTime": "-1",
-            "duration": str(duration),
-        },
-        headers=auth_headers(token, sso_id),
-        timeout=HTTP_TIMEOUT,
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-
-def get_reservations_list(session, token, sso_id, member_ids, start_date, end_date):
-    """Return list of {date_str, reg_id, label} dicts sorted by date."""
-    params = [
-        ("start", start_date.strftime("%-m/%-d/%Y")),
-        ("end", end_date.strftime("%-m/%-d/%Y")),
-        ("groupCamps", "true"),
-        ("pageSize", "0"),
-    ]
-    for mid in member_ids:
-        params.append(("memberIds", str(mid)))
-    resp = session.get(
-        f"{API_BASE}/ux/web-schedules/v3/reservations",
-        params=params,
-        headers=auth_headers(token, sso_id),
-        timeout=HTTP_TIMEOUT,
-    )
-    resp.raise_for_status()
-    out = []
-    for item in sorted(resp.json().get("results", []), key=lambda x: x.get("start", "")):
-        start = item.get("start", "")
-        if not start:
-            continue
-        reg_id = item.get("regId") or item.get("registrationId") or item.get("id")
-        # Extract the attendee id used by the cancel endpoint. The reservations
-        # API exposes it under registration.registeredMembers[].cancelCtas (the
-        # online CTA) — the top-level id is NOT accepted by the cancel endpoint.
-        attendee_id = None
-        for member in (item.get("registration", {}) or {}).get("registeredMembers", []):
-            attendee_id = member.get("attendeeId") or attendee_id
-            for cta in member.get("cancelCtas", []):
-                if cta.get("method") == "online" and cta.get("registrationId"):
-                    attendee_id = cta["registrationId"]
-                    break
-            if attendee_id:
-                break
-        try:
-            dt = datetime.fromisoformat(start[:19])
-            date_label = dt.strftime("%a %b %-d")
-            time_label = dt.strftime("%-I:%M %p")
-        except Exception:
-            date_label = start[:10]
-            time_label = ""
-        raw_loc = item.get("location") or item.get("resourceName") or ""
-        if " | " in raw_loc:
-            raw_loc = raw_loc.split(" | ")[-1].split(",")[0].strip()
-        court = raw_loc.strip()
-        label = f"{date_label} — {time_label}" + (f", {court}" if court else "")
-        out.append({"date_str": start[:10], "reg_id": reg_id,
-                    "attendee_id": attendee_id, "label": label})
-    return out
-
-
-def get_reserved_dates(session, token, sso_id, member_ids, start_date, end_date):
-    """Return (date_set, label_list) for existing reservations in the date range."""
-    reservations = get_reservations_list(session, token, sso_id, member_ids, start_date, end_date)
-    reserved = {r["date_str"] for r in reservations}
-    labels = [r["label"] for r in reservations]
-    return reserved, labels
-
-
-def raise_for_status_with_body(resp):
-    """Like raise_for_status() but includes the response body in the exception message."""
-    try:
-        resp.raise_for_status()
-    except requests.HTTPError as e:
-        body = resp.text[:500] if resp.text else "(empty)"
-        raise requests.HTTPError(f"{e} — body: {body}", response=resp) from None
-
-
-def book_court(session, token, sso_id, resource_id, start, duration):
-    """Create a booking and immediately complete it (accept waiver)."""
-    resp = session.post(
-        f"{API_BASE}/sys/registrations/V3/ux/resource",
-        json={
-            "resourceId": resource_id,
-            "start": start,
-            "service": None,
-            "duration": str(duration),
-        },
-        headers={**auth_headers(token, sso_id), "content-type": "application/json"},
-        timeout=HTTP_TIMEOUT,
-    )
-    raise_for_status_with_body(resp)
-    booking = resp.json()
-
-    # Complete the booking (accept waiver) — moves from pending → completed
-    reg_id = booking.get("regId")
-    agreement_id = booking.get("agreement", {}).get("agreementId")
-    if reg_id and agreement_id and not booking.get("registrationType", {}).get("skipConfirmation", True):
-        complete_resp = session.put(
-            f"{API_BASE}/sys/registrations/V3/ux/resource/{reg_id}/complete",
-            json={"acceptedDocuments": [int(agreement_id)]},
-            headers={**auth_headers(token, sso_id), "content-type": "application/json"},
-            timeout=HTTP_TIMEOUT,
-        )
-        try:
-            raise_for_status_with_body(complete_resp)
-            booking["regStatus"] = "completed"
-        except requests.HTTPError as e:
-            # Booking exists but waiver confirmation failed — slot is ours (pending).
-            # Don't raise: returning here stops the retry loop from re-booking the same slot.
-            log.warning("Booking created (regId=%s) but /complete failed: %s", reg_id, e)
-            log.warning("Slot is pending — check your reservations page manually")
-
-    return booking
-
-
-# ── Slot utilities and report builders live in lifetime_reserve.slots / .reports
-# (imported at the top). _fetch_upcoming stays here because it does I/O.
-
-
-def _fetch_upcoming(session, token, sso_id, config):
+def _fetch_upcoming(client, config):
     """Fetch upcoming reservation labels for the horizon. Empty list on error / no member_ids."""
     member_ids = config.get("member_ids", [])
     if not member_ids:
@@ -240,8 +56,8 @@ def _fetch_upcoming(session, token, sso_id, config):
     days_ahead = config.get("days_ahead", 8)
     today = date.today()
     try:
-        _, labels = get_reserved_dates(
-            session, token, sso_id, member_ids,
+        _, labels = client.reserved_dates_and_labels(
+            member_ids,
             today + timedelta(days=1),
             today + timedelta(days=days_ahead),
         )
@@ -249,28 +65,6 @@ def _fetch_upcoming(session, token, sso_id, config):
     except Exception as e:
         log.warning("Could not fetch upcoming reservations: %s", e)
         return []
-
-
-def send_slack(config, text):
-    """Post a message to the configured Slack channel via bot API. Failures are logged, not raised."""
-    token = config.get("slack_bot_token", "")
-    channel = config.get("slack_channel", "")
-    if not token or not channel:
-        return
-    try:
-        resp = requests.post(
-            "https://slack.com/api/chat.postMessage",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"channel": channel, "text": text},
-            timeout=(5, 10),
-        )
-        data = resp.json()
-        if not data.get("ok"):
-            log.warning("Slack notification failed: %s", data.get("error"))
-        else:
-            log.info("Slack notification sent")
-    except Exception as e:
-        log.warning("Slack notification failed: %s", e)
 
 
 # ── Interactive prompts ────────────────────────────────────────────────────────
@@ -308,7 +102,7 @@ def prompt_slot(slots):
 
 # ── Mode handlers ──────────────────────────────────────────────────────────────
 
-def run_interactive(session, token, sso_id, config):
+def run_interactive(client, config):
     club_id = config.get("club_id", "36")
     sport = config.get("sport", "Pickleball: Indoor")
     duration = config.get("duration", 60)
@@ -316,7 +110,7 @@ def run_interactive(session, token, sso_id, config):
 
     target_date = prompt_date(days_ahead)
     log.info("Searching courts for %s ...", target_date.strftime("%A %Y-%m-%d"))
-    result = search_courts(session, token, sso_id, club_id, sport, target_date, duration)
+    result = client.search_courts(club_id, sport, target_date, duration)
     slots = collect_slots(result)
     if not slots:
         log.info("No courts available for %s", target_date)
@@ -333,12 +127,12 @@ def run_interactive(session, token, sso_id, config):
         return
 
     log.info("Booking %s %s ...", slot["time"], slot["resourceName"])
-    booking = book_court(session, token, sso_id, slot["resourceId"], slot["start"], duration)
+    booking = client.book_court(slot["resourceId"], slot["start"], duration)
     log.info("Confirmed: regId=%s, status=%s, location=%s",
              booking["regId"], booking["regStatus"], booking.get("location", ""))
 
 
-def run_slot(session, token, sso_id, config, slot_datetime_str):
+def run_slot(client, config, slot_datetime_str):
     """Book a specific date/time directly. Returns (dt, booked_slot_or_None, reason_or_None)."""
     try:
         dt = datetime.strptime(slot_datetime_str, "%Y-%m-%d %H:%M")
@@ -354,7 +148,7 @@ def run_slot(session, token, sso_id, config, slot_datetime_str):
 
     log.info("Searching courts for %s at %s ...", target_date.strftime("%A %Y-%m-%d"), api_time)
     try:
-        result = search_courts(session, token, sso_id, club_id, sport, target_date, duration)
+        result = client.search_courts(club_id, sport, target_date, duration)
         slots = collect_slots(result)
     except Exception as e:
         log.error("Search failed: %s", e)
@@ -368,7 +162,7 @@ def run_slot(session, token, sso_id, config, slot_datetime_str):
 
     log.info("Booking %s %s ...", slot["time"], slot["resourceName"])
     try:
-        booking = book_court(session, token, sso_id, slot["resourceId"], slot["start"], duration)
+        booking = client.book_court(slot["resourceId"], slot["start"], duration)
         log.info("Confirmed: regId=%s, status=%s, location=%s",
                  booking["regId"], booking["regStatus"], booking.get("location", ""))
         return dt, slot, None
@@ -377,7 +171,7 @@ def run_slot(session, token, sso_id, config, slot_datetime_str):
         return dt, None, f"booking failed: {e}"
 
 
-def run_auto(session, token, sso_id, config, fallback=False):
+def run_auto(client, config, fallback=False):
     club_id = config.get("club_id", "36")
     sport = config.get("sport", "Pickleball: Indoor")
     duration = config.get("duration", 60)
@@ -393,8 +187,8 @@ def run_auto(session, token, sso_id, config, fallback=False):
     reservation_labels = []
 
     if member_ids:
-        reserved_dates, reservation_labels = get_reserved_dates(
-            session, token, sso_id, member_ids,
+        reserved_dates, reservation_labels = client.reserved_dates_and_labels(
+            member_ids,
             today + timedelta(days=1),
             today + timedelta(days=days_ahead),
         )
@@ -410,7 +204,7 @@ def run_auto(session, token, sso_id, config, fallback=False):
             return None
 
         log.info("Searching %s ...", target_date.strftime("%A %Y-%m-%d"))
-        result = search_courts(session, token, sso_id, club_id, sport, target_date, duration)
+        result = client.search_courts(club_id, sport, target_date, duration)
         slots = collect_slots(result)
 
         if not slots:
@@ -425,7 +219,7 @@ def run_auto(session, token, sso_id, config, fallback=False):
             return None
 
         log.info("Booking %s %s ...", slot["time"], slot["resourceName"])
-        booking = book_court(session, token, sso_id, slot["resourceId"], slot["start"], duration)
+        booking = client.book_court(slot["resourceId"], slot["start"], duration)
         log.info("Confirmed: regId=%s, status=%s, location=%s",
                  booking["regId"], booking["regStatus"], booking.get("location", ""))
         return slot
@@ -443,7 +237,7 @@ def run_auto(session, token, sso_id, config, fallback=False):
 
     log.info("Searching %s ...", day8.strftime("%A %Y-%m-%d"))
     try:
-        result = search_courts(session, token, sso_id, club_id, sport, day8, duration)
+        result = client.search_courts(club_id, sport, day8, duration)
         day8_slots = collect_slots(result)
     except Exception as e:
         log.error("Search failed for %s: %s", day8_str, e)
@@ -473,8 +267,7 @@ def run_auto(session, token, sso_id, config, fallback=False):
             try:
                 log.info("Booking %s %s (attempt %d/%d) ...",
                          slot["time"], slot["resourceName"], attempt, retry_count)
-                booking = book_court(session, token, sso_id,
-                                     slot["resourceId"], slot["start"], duration)
+                booking = client.book_court(slot["resourceId"], slot["start"], duration)
                 log.info("Confirmed: regId=%s, status=%s, location=%s",
                          booking["regId"], booking["regStatus"], booking.get("location", ""))
                 booked_slot = slot
@@ -488,8 +281,7 @@ def run_auto(session, token, sso_id, config, fallback=False):
                     # 4xx: slot is gone — re-search for another preferred slot
                     log.info("Slot taken — re-searching %s ...", day8_str)
                     try:
-                        result = search_courts(session, token, sso_id,
-                                               club_id, sport, day8, duration)
+                        result = client.search_courts(club_id, sport, day8, duration)
                         new_slots = collect_slots(result)
                         if new_slots:
                             log.info("Available: %s", fmt_slots(new_slots))
@@ -540,7 +332,7 @@ def run_auto(session, token, sso_id, config, fallback=False):
             "day8_slots": day8_slots, "reservation_labels": reservation_labels}
 
 
-def run_dry_run(session, token, sso_id, config):
+def run_dry_run(client, config):
     club_id = config.get("club_id", "36")
     sport = config.get("sport", "Pickleball: Indoor")
     duration = config.get("duration", 60)
@@ -552,8 +344,8 @@ def run_dry_run(session, token, sso_id, config):
 
     member_ids = config.get("member_ids", [])
     if member_ids:
-        reserved_dates, _ = get_reserved_dates(
-            session, token, sso_id, member_ids,
+        reserved_dates, _ = client.reserved_dates_and_labels(
+            member_ids,
             today + timedelta(days=1),
             today + timedelta(days=days_ahead),
         )
@@ -570,7 +362,7 @@ def run_dry_run(session, token, sso_id, config):
             log.info("%s: already reserved", label)
             continue
 
-        result = search_courts(session, token, sso_id, club_id, sport, target_date, duration)
+        result = client.search_courts(club_id, sport, target_date, duration)
         slots = collect_slots(result)
 
         if not slots:
@@ -587,7 +379,7 @@ def run_dry_run(session, token, sso_id, config):
             log.info("  All available: %s", all_times)
 
 
-def run_date(session, token, sso_id, config, date_str):
+def run_date(client, config, date_str):
     """Search a specific date and book best preferred slot.
     Returns (target_date, booked_slot_or_None, reason_or_None, slots)."""
     try:
@@ -603,7 +395,7 @@ def run_date(session, token, sso_id, config, date_str):
 
     log.info("Searching %s ...", target_date.strftime("%A %Y-%m-%d"))
     try:
-        result = search_courts(session, token, sso_id, club_id, sport, target_date, duration)
+        result = client.search_courts(club_id, sport, target_date, duration)
         slots = collect_slots(result)
     except Exception as e:
         log.error("Search failed: %s", e)
@@ -619,7 +411,7 @@ def run_date(session, token, sso_id, config, date_str):
         return target_date, None, "no preferred time available", slots
     log.info("Booking %s %s ...", slot["time"], slot["resourceName"])
     try:
-        booking = book_court(session, token, sso_id, slot["resourceId"], slot["start"], duration)
+        booking = client.book_court(slot["resourceId"], slot["start"], duration)
         log.info("Confirmed: regId=%s, status=%s, location=%s",
                  booking["regId"], booking["regStatus"], booking.get("location", ""))
         return target_date, slot, None, slots
@@ -628,8 +420,8 @@ def run_date(session, token, sso_id, config, date_str):
         return target_date, None, f"booking failed: {e}", slots
 
 
-def run_cancel(session, token, sso_id, config, date_str):
-    """Cancel reservation(s) on a specific date. Returns (target_date, cancelled_labels)."""
+def run_cancel(client, config, date_str):
+    """Cancel reservation(s) on a specific date. Returns (target_date, cancelled_labels, found_count)."""
     try:
         target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
@@ -639,8 +431,7 @@ def run_cancel(session, token, sso_id, config, date_str):
     if not member_ids:
         log.error("member_ids not configured — cannot look up reservation")
         sys.exit(1)
-    reservations = get_reservations_list(
-        session, token, sso_id, member_ids, target_date, target_date)
+    reservations = client.get_reservations(member_ids, target_date, target_date)
     if not reservations:
         log.info("No reservation found on %s", date_str)
         return target_date, [], 0
@@ -652,12 +443,7 @@ def run_cancel(session, token, sso_id, config, date_str):
             continue
         log.info("Cancelling %s (attendeeId=%s) ...", res["label"], attendee_id)
         try:
-            resp = session.delete(
-                f"{API_BASE}/sys/registrations/V3/ux/resource/0/attendees/{attendee_id}",
-                headers=auth_headers(token, sso_id),
-                timeout=HTTP_TIMEOUT,
-            )
-            raise_for_status_with_body(resp)
+            client.cancel_attendee(attendee_id)
             log.info("Cancelled successfully")
             cancelled.append(res["label"])
         except Exception as e:
@@ -702,14 +488,18 @@ def main():
             else "list" if args.list_reservations
             else "interactive")
     log.info("Run started — mode: %s", mode)
-    config = load_config()
-    validate_config(config)
-    session = make_session()
+    try:
+        config = load_config()
+        validate_config(config)
+    except ConfigError as e:
+        log.error("%s", e)
+        sys.exit(1)
+    client = LifetimeClient()
 
     # Login with retry — transient network errors at 8:55 AM shouldn't abort the whole run
     for attempt in range(1, 4):
         try:
-            token, sso_id = login(session, config["username"], config["password"])
+            client.login(config["username"], config["password"])
             break
         except Exception as e:
             log.error("Login attempt %d/3 failed: %s", attempt, e)
@@ -746,35 +536,35 @@ def main():
 
     report = None
     if args.cancel:
-        target_date, cancelled, found_count = run_cancel(session, token, sso_id, config, args.cancel)
-        upcoming = _fetch_upcoming(session, token, sso_id, config)
+        target_date, cancelled, found_count = run_cancel(client, config, args.cancel)
+        upcoming = _fetch_upcoming(client, config)
         report = build_cancel_report(target_date, cancelled, found_count, upcoming)
     elif args.date:
-        target_date, booked_slot, reason, slots = run_date(session, token, sso_id, config, args.date)
-        upcoming = _fetch_upcoming(session, token, sso_id, config)
+        target_date, booked_slot, reason, slots = run_date(client, config, args.date)
+        upcoming = _fetch_upcoming(client, config)
         report = build_date_report(target_date, booked_slot, reason, slots, upcoming)
     elif args.slot:
-        dt, booked_slot, reason = run_slot(session, token, sso_id, config, args.slot)
-        upcoming = _fetch_upcoming(session, token, sso_id, config)
+        dt, booked_slot, reason = run_slot(client, config, args.slot)
+        upcoming = _fetch_upcoming(client, config)
         report = build_slot_report(dt, booked_slot, reason, upcoming)
     elif args.auto:
-        result = run_auto(session, token, sso_id, config, fallback=args.fallback)
+        result = run_auto(client, config, fallback=args.fallback)
         report = build_auto_report(
             result["status"], result["target_date"], result.get("booked_slot"),
             result.get("day8_slots", []), result.get("reservation_labels", []),
         )
     elif args.list_reservations:
-        upcoming = _fetch_upcoming(session, token, sso_id, config)
+        upcoming = _fetch_upcoming(client, config)
         report = build_list_report(upcoming)
     elif args.dry_run:
-        run_dry_run(session, token, sso_id, config)
+        run_dry_run(client, config)
     else:
-        run_interactive(session, token, sso_id, config)
+        run_interactive(client, config)
 
     if report is not None:
         emit_report(report)
         if not args.no_notify:
-            send_slack(config, report)
+            notify(config, report)
 
 
 if __name__ == "__main__":

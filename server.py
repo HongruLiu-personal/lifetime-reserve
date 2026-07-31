@@ -31,23 +31,19 @@ from urllib.parse import parse_qs
 
 import requests
 
+from lifetime_reserve.config import load_config
+from lifetime_reserve import notify
 from lifetime_reserve.slackbot.parsing import parse_date_token, parse_command_text
 from lifetime_reserve.slackbot.logparse import (
     SUMMARY_KEYWORDS, extract_report, extract_log_lines, truncate)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 SCRIPT = os.path.join(BASE_DIR, "reserve.py")
 PYTHON = sys.executable
 PORT = int(os.environ.get("PORT", "5000"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
-
-
-def load_config():
-    with open(CONFIG_FILE) as f:
-        return json.load(f)
 
 
 def load_signing_secret():
@@ -57,38 +53,21 @@ def load_signing_secret():
         return ""
 
 
-def slack_post(text, thread_ts=None):
+def slack_post(text, thread_ts=None, channel=None):
     """Post a new message via bot API. Returns (ts, channel) or (None, None) on failure."""
     cfg = load_config()
-    payload = {"channel": cfg.get("slack_channel", ""), "text": text}
-    if thread_ts:
-        payload["thread_ts"] = thread_ts
-    resp = requests.post(
-        "https://slack.com/api/chat.postMessage",
-        headers={"Authorization": f"Bearer {cfg.get('slack_bot_token', '')}"},
-        json=payload,
-        timeout=10,
+    return notify.post_message(
+        cfg.get("slack_bot_token", ""),
+        channel or cfg.get("slack_channel", ""),
+        text,
+        thread_ts=thread_ts,
     )
-    data = resp.json()
-    if not data.get("ok"):
-        log.error("chat.postMessage failed: %s", data.get("error"))
-        return None, None
-    return data["ts"], data["channel"]
 
 
 def slack_update(ts, channel, text):
     """Edit an existing message in place via bot API."""
     cfg = load_config()
-    resp = requests.post(
-        "https://slack.com/api/chat.update",
-        headers={"Authorization": f"Bearer {cfg.get('slack_bot_token', '')}"},
-        json={"channel": channel, "ts": ts, "text": text},
-        timeout=10,
-    )
-    data = resp.json()
-    if not data.get("ok"):
-        log.error("chat.update failed: %s (ts=%s, channel=%s)", data.get("error"), ts, channel)
-    return data
+    return notify.update_message(cfg.get("slack_bot_token", ""), channel, ts, text)
 
 
 def verify_slack(body: bytes, timestamp: str, signature: str) -> bool:
