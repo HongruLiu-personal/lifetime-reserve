@@ -28,9 +28,42 @@ VPS (it uses `requirements.txt` only).
 
 ## Architecture
 
-Single-file script (`reserve.py`) with a flat function structure. All configuration is read from `config.json` at startup.
+The code is a package, `lifetime_reserve/`, with two thin root shims (`reserve.py`,
+`server.py`) kept so cron / launchd / systemd / the Slack subprocess keep invoking
+`python3 reserve.py ...` / `python3 server.py` unchanged. Running from the repo root
+puts the package on the path — no install step, VPS deploy stays a plain `git pull`.
 
-**API layer** — endpoints under `https://api.lifetimefitness.com`:
+```
+reserve.py / server.py        # 2-line entry shims → lifetime_reserve.cli / .slackbot.server
+lifetime_reserve/
+├── config.py                 # typed frozen Config dataclass, load_config, ConfigError (defaults live here)
+├── protocol.py               # <<<REPORT>>> markers (engine↔slackbot stdout contract)
+├── slots.py                  # PURE: collect_slots, auto_pick, pick_by_time, to_api_time, fmt_slots
+├── reports.py                # PURE: build_*_report, emit_report
+├── notify.py                 # Slack posting: post_message/update_message (explicit channel) + notify()
+├── api/{errors,client}.py    # LifetimeClient — session + auth + all API endpoints
+├── modes.py                  # run_auto/run_date/run_slot/run_cancel/run_dry_run/run_interactive
+├── cli.py                    # parse_args, login-retry, wait-until, dispatch, main (the only sys.exit layer)
+└── slackbot/
+    ├── parsing.py            # PURE: parse_date_token, parse_command_text, strip_mention
+    ├── logparse.py           # PURE: extract_report, extract_log_lines, truncate
+    ├── verify.py             # HMAC signature verification
+    ├── dispatch.py           # subprocess runner + Slack reply builders (run_and_report[_threaded])
+    ├── events.py             # Events API: dedup (thread-safe), should_process_event, handle_event
+    └── server.py             # HTTP handler: /reserve /cancel /list (slash) + /events (Events API)
+tests/                        # pytest suite (FakeSession / FakeClient; no network) — see "Running tests"
+```
+
+Config handlers take a `LifetimeClient` + `Config`; the mode handlers raise
+`ValueError`/`ConfigError` on bad input and `cli.main` decides process exit.
+
+**Slack transports.** Slash commands (`/reserve`, `/cancel`, `/list`) are live in
+production. The Events API (`/events`, threaded replies for channel `@mention` + DM) is
+**implemented and unit-tested but not deployed** — enabling it needs Slack-dashboard
+config + a VPS deploy (see `MODULARIZATION_AND_SLACKBOT_PLAN.md`, Phase 5). The live
+server keeps running the slash-command code until then.
+
+**API layer** (`api/client.py`) — endpoints under `https://api.lifetimefitness.com`:
 - `POST /auth/v2/login` → returns `token` (JWE, used as `x-ltf-jwe`) and `ssoId` (used as `x-ltf-ssoid`)
 - `GET /ux/web-schedules/v2/resources/booking/search` → available court slots for a date
 - `POST /sys/registrations/V3/ux/resource` → creates a booking (`regStatus: pending`)
@@ -39,9 +72,7 @@ Single-file script (`reserve.py`) with a flat function structure. All configurat
 
 Every API request requires the `ocp-apim-subscription-key` header (hardcoded) plus the two auth headers from login.
 
-**Code structure** — four mode handler functions: `run_interactive`, `run_slot`, `run_auto`, `run_dry_run`. Shared helpers: `book_court` (create + complete), `collect_slots`, `auto_pick`, `pick_by_time`, `to_api_time`, `fmt_slots`, `validate_config`, `raise_for_status_with_body`.
-
-**Auto booking logic** (`run_auto()`):
+**Auto booking logic** (`modes.run_auto()`):
 1. Search day 8 **once** at 9 AM sharp, then retry **only the booking step** up to `retry_count` times:
    - On 5xx (server overload): immediately retry booking the same slot — avoids releasing the slot between attempts
    - On 4xx (slot taken): re-search once for another preferred slot, then continue retrying
