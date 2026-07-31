@@ -15,6 +15,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 .venv/bin/python reserve.py --list                            # list current upcoming reservations
 ```
 
+## Running tests
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt   # one-time: pytest (+ requests)
+.venv/bin/python -m pytest -q                    # run the suite
+```
+
+Tests are pure/mocked — no network, no `config.json`, no secrets. CI runs the same
+command on push/PR (`.github/workflows/tests.yml`). Dev deps are never installed on the
+VPS (it uses `requirements.txt` only).
+
 ## Architecture
 
 Single-file script (`reserve.py`) with a flat function structure. All configuration is read from `config.json` at startup.
