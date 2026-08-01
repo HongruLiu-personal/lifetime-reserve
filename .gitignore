@@ -12,6 +12,7 @@ __pycache__/
 .vps_env
 
 # Local research/planning notes (kept off git)
+research/
 SLACK_BOT_MIGRATION.md
 MODULARIZATION_AND_SLACKBOT_PLAN.md
 HARDENING_PLAN.md
