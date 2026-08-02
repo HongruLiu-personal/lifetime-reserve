@@ -110,6 +110,14 @@ git add -p && git commit -m "..." && git push
 cd /root/lifetime-reserve && git pull
 ```
 
+If the pull changed Slack-server code (`server.py` or `lifetime_reserve/slackbot/`), restart the bot so it picks up the change:
+
+```bash
+systemctl restart reserve-server.service   # the Slack server runs as a systemd service on the VPS
+```
+
+The booking cron invokes `reserve.py` fresh each run, so it needs no restart.
+
 **Never commit sensitive info.** Secrets and machine-specific details stay out of git and are delivered out-of-band via `scp`. Gitignored, never pushed:
 
 - `config.json` — Lifetime credentials, Slack bot token, signing secret
@@ -128,7 +136,9 @@ Before committing, scan the diff for tokens, passwords, keys, host IPs, and SSH 
 
 GitHub Actions cron has unpredictable queue delays (minutes) and is **not suitable** for this time-critical task. Use one of the options below instead.
 
-### Option 1: macOS launchd (current) — requires MacBook on and awake at 9 AM
+**Current setup:** the daily booking runs on the VPS via cron (Option 2), and the Slack server runs there as a systemd service (`reserve-server.service`). Option 1 (launchd) is documented as an alternative but is not currently in use.
+
+### Option 1: macOS launchd (alternative) — requires MacBook on and awake at 9 AM
 
 Plist installed at `~/Library/LaunchAgents/com.user.lifetime-reserve.plist`. Logs go to `logs/YYYY-MM-DD.log` (one file per day).
 
@@ -146,14 +156,14 @@ tail -f logs/$(date +%Y-%m-%d).log
 
 The plist points directly to `.venv/bin/python` — no activation needed.
 
-### Option 2: VPS with cron (~$4/month, most reliable)
+### Option 2: VPS with cron (current, ~$4/month, most reliable)
 
 Any cheap VPS (Hetzner CX22, DigitalOcean Droplet). Cron fires within seconds of schedule.
 
 ```bash
 sudo timedatectl set-timezone America/New_York
 sudo apt install python3 python3-pip git -y
-git clone https://github.com/mortimerliu/lifetime-reserve.git
+git clone https://github.com/HongruLiu-personal/lifetime-reserve.git
 cd lifetime-reserve && pip3 install requests
 nano config.json   # paste your config
 

@@ -22,6 +22,8 @@ Copy `config.json` and fill in your credentials (see [Configuration](#configurat
 .venv/bin/python reserve.py --auto --wait-until 09:00:00           # login early, book at 9 AM sharp
 .venv/bin/python reserve.py --dry-run                              # show available slots, no booking
 .venv/bin/python reserve.py --slot "2026-03-16 04:30"              # book a specific slot directly (24h format)
+.venv/bin/python reserve.py --cancel 2026-08-03                    # cancel the reservation on a date
+.venv/bin/python reserve.py --list                                # list current upcoming reservations
 ```
 
 ## Configuration
@@ -76,7 +78,7 @@ Any cheap VPS works (e.g. Hetzner CAX11 ~$4/mo). Cron fires within seconds of sc
 ```bash
 timedatectl set-timezone America/New_York
 apt update && apt install -y python3 python3-pip git
-git clone https://github.com/mortimerliu/lifetime-reserve.git
+git clone https://github.com/HongruLiu-personal/lifetime-reserve.git
 cd lifetime-reserve && pip3 install requests
 nano config.json   # paste your config
 
