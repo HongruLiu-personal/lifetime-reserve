@@ -23,29 +23,21 @@ on. Cite concrete facts (file paths, versions, command output). A spec built on 
 or on stale docs — is the main failure mode; every assumption you can cheaply verify,
 verify.
 
-**Check each claim against its real source of truth — not whatever is easiest to read.**
-- **Repo-authoritative** — code structure, types, dependencies, config committed in the
-  tree: the codebase answers, so read the files.
-- **Environment-authoritative** — what is actually deployed and running, prod config and
-  feature flags, whether a migration/backfill has run, live versions, data state: the
-  *running system* answers. Check the prod deploy / live state directly; do **not** infer
-  these from documentation.
-
-**Treat docs about current state as hypotheses, not facts.** READMEs, code comments, and
-prior specs describe intent at a point in time and drift out of date. Any "not yet / not
-deployed / TODO / planned / as of ⟨date⟩" note is a claim to confirm against reality —
-above all when the plan's shape depends on it.
+**Check each claim against its real source of truth.** Code structure, types, deps, and
+config in the tree are repo-authoritative — read the files. But what is actually deployed
+and running, prod config and feature flags, migration status, live versions, and data
+state are answered only by the *running system* — check it directly. Treat docs (READMEs,
+comments, prior specs) about current state as hypotheses: they describe intent at a point
+in time and drift, so any "not yet / not deployed / TODO / as of ⟨date⟩" note is a claim
+to confirm against reality. Agreement across documents is not evidence — docs derive from
+one another and can be stale together.
 
 **Verify the load-bearing premise first.** Name the one assumption that, if wrong, throws
-out the whole plan (e.g. "X isn't built yet," "Y is already live," "Z can't change").
-Verify that one hardest, against its real source of truth, before you structure the
-phases around it — being wrong here invalidates everything downstream.
-
-**Record evidence, not just verdicts.** For each load-bearing fact, capture what proved
-it (command output, a log line, a version string, a file:line) — not only the conclusion.
-This makes the spec auditable and lets a reviewer re-check the foundation cheaply. Note
-that agreement across documents is *not* evidence: docs often derive from one another, so
-several can be stale together. Only the system of record counts.
+out the whole plan (e.g. "X isn't built yet," "Y is already live," "Z can't change"), and
+verify that one hardest, against its real source of truth, before structuring the phases
+around it. For each load-bearing fact, record what proved it (command output, a log line,
+a version string, a `file:line`) — not just the verdict — so a reviewer can re-check the
+foundation cheaply.
 
 ### 2. Create the doc in the research directory
 - Location: `research/` at the repo root. If it doesn't exist, create it with two
@@ -79,9 +71,8 @@ several can be stale together. Only the system of record counts.
 ### 4. Critically review the spec after writing (mandatory)
 Do a genuine self-review pass — do not rubber-stamp your own draft. Hunt for:
 - internal contradictions (a decision in one section undercut in another),
-- unstated assumptions and unverified claims — in particular, any load-bearing claim
-  about current/runtime state (what's deployed, live config, migration status) taken from
-  docs rather than checked against the running system,
+- unstated assumptions and unverified claims — especially runtime state taken from docs
+  (see step 1),
 - gaps that would bite during implementation (sequencing, test/CI parity, rollback,
   security, concurrency, error paths),
 - sections that don't reconcile after edits.
