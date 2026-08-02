@@ -48,20 +48,20 @@ lifetime_reserve/
     ├── parsing.py            # PURE: parse_date_token, parse_command_text, strip_mention
     ├── logparse.py           # PURE: extract_report, extract_log_lines, truncate
     ├── verify.py             # HMAC signature verification
-    ├── dispatch.py           # subprocess runner + Slack reply builders (run_and_report[_threaded])
+    ├── dispatch.py           # subprocess runner + Slack reply builders (run_and_report_threaded)
     ├── events.py             # Events API: dedup (thread-safe), should_process_event, handle_event
-    └── server.py             # HTTP handler: /reserve /cancel /list (slash) + /events (Events API)
+    └── server.py             # HTTP handler: /events (Events API)
 tests/                        # pytest suite (FakeSession / FakeClient; no network) — see "Running tests"
 ```
 
 Config handlers take a `LifetimeClient` + `Config`; the mode handlers raise
 `ValueError`/`ConfigError` on bad input and `cli.main` decides process exit.
 
-**Slack transports.** Slash commands (`/reserve`, `/cancel`, `/list`) are live in
-production. The Events API (`/events`, threaded replies for channel `@mention` + DM) is
-**implemented and unit-tested but not deployed** — enabling it needs Slack-dashboard
-config + a VPS deploy (see `MODULARIZATION_AND_SLACKBOT_PLAN.md`, Phase 5). The live
-server keeps running the slash-command code until then.
+**Slack transport.** The Events API (`/events`) is the sole Slack interface: threaded
+replies for channel `@mention` + DM, deployed and live in production. Commands: `reserve`
+(optionally with a date / `date HH:MM`), `cancel <date>`, `list`, plus a `verbose`
+modifier — parsed by `parsing.parse_command_text` / `events.build_command`. The old slash
+commands (`/reserve`, `/cancel`, `/list`) were removed in favor of the Events API.
 
 **API layer** (`api/client.py`) — endpoints under `https://api.lifetimefitness.com`:
 - `POST /auth/v2/login` → returns `token` (JWE, used as `x-ltf-jwe`) and `ssoId` (used as `x-ltf-ssoid`)

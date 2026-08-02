@@ -51,7 +51,7 @@ def parse_args(argv=None):
     group.add_argument("--list", action="store_true", dest="list_reservations",
                        help="List current upcoming reservations")
     parser.add_argument("--no-notify", action="store_true",
-                        help="Skip Slack notification (used when called from the slash command server)")
+                        help="Skip Slack notification (used when called from the Slack server)")
     parser.add_argument("--wait-until", metavar="HH:MM:SS",
                         help="Login immediately, then wait until this time before booking (e.g. 09:00:00)")
     return parser.parse_args(argv)

@@ -49,37 +49,7 @@ def test_run_script_timeout(monkeypatch):
     assert all_lines == []
 
 
-# ── run_and_report ───────────────────────────────────────────────────────────
-
-def test_run_and_report_updates_parent_and_threads_verbose(monkeypatch):
-    posts = []
-    updates = []
-    monkeypatch.setattr(dispatch, "slack_post",
-                        lambda text, thread_ts=None, channel=None: (posts.append((text, thread_ts)) or ("ts1", "C1")))
-    monkeypatch.setattr(dispatch, "slack_update",
-                        lambda ts, ch, text: updates.append((ts, ch, text)))
-    monkeypatch.setattr(dispatch, "run_script",
-                        lambda args, label: ("RESULT", ["line one", "line two"]))
-
-    dispatch.run_and_report(["--auto"], "http://resp", "Auto", verbose=True)
-
-    # parent "Auto..." posted, then updated with the result
-    assert posts[0][0] == "Auto..."
-    assert updates == [("ts1", "C1", "RESULT")]
-    # verbose → a second post in the parent thread with the full log
-    assert any(thread_ts == "ts1" and "Full log" in text for text, thread_ts in posts)
-
-
-def test_run_and_report_non_verbose_no_thread_post(monkeypatch):
-    posts = []
-    monkeypatch.setattr(dispatch, "slack_post",
-                        lambda text, thread_ts=None, channel=None: (posts.append((text, thread_ts)) or ("ts1", "C1")))
-    monkeypatch.setattr(dispatch, "slack_update", lambda ts, ch, text: None)
-    monkeypatch.setattr(dispatch, "run_script", lambda args, label: ("RESULT", ["x"]))
-
-    dispatch.run_and_report(["--auto"], "http://resp", "Auto", verbose=False)
-    assert posts == [("Auto...", None)]   # only the parent, no thread reply
-
+# ── run_and_report_threaded ────────────────────────────────────────────────────
 
 def test_run_and_report_threaded_threads_under_user_message(monkeypatch):
     # Events path: parent + verbose reply both go to the event channel and thread under

@@ -1,7 +1,7 @@
 """Pure command/date parsing for the Slack layer — no network, no I/O.
 
-Turns Slack command text into `reserve.py` CLI args. Shared by the slash-command
-handlers and (Phase 4) the Events API dispatcher.
+Turns Slack command text into `reserve.py` CLI args, used by the Events API dispatcher
+(`@mention` in channel + DM).
 """
 
 import re
@@ -23,7 +23,7 @@ WEEKDAY_PATTERN = re.compile(
 
 
 def strip_mention(text: str) -> str:
-    """Remove a leading <@USERID> mention from app_mention text (Phase 4)."""
+    """Remove a leading <@USERID> mention from app_mention text."""
     return re.sub(r"^\s*<@[A-Z0-9]+>\s*", "", text)
 
 
@@ -48,7 +48,7 @@ def parse_date_token(text):
 
 
 def parse_command_text(text):
-    """Parse slash command text into (args, label, verbose).
+    """Parse Slack command text into (args, label, verbose).
 
     Append 'verbose' to the command to see full log output.
     Date can be YYYY-MM-DD or a weekday name (Mon, Tuesday, etc.).
@@ -81,6 +81,7 @@ def parse_command_text(text):
         return ["--date", date_str], f"Book best slot on {date_label}", verbose
     return None, (
         f'Could not parse: `{text}`\n'
-        "Usage: `/reserve`, `/reserve <date>`, or `/reserve <date> HH:MM`\n"
+        "Usage (@mention me or DM me): `reserve`, `reserve <date>`, or "
+        "`reserve <date> HH:MM`\n"
         "Date can be `YYYY-MM-DD` or a weekday name (`Mon`, `Tuesday`, ...)"
     ), False

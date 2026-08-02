@@ -56,7 +56,7 @@ def build_command(raw_text: str):
     """Map event text → (args, label, verbose), or (None, error_msg, False) on failure.
 
     First word decides the command: `cancel` → cancel, `list` → list; otherwise a
-    leading `reserve` is stripped and the remainder is parsed like a slash command.
+    leading `reserve` is stripped and the remainder is parsed by parse_command_text.
     """
     text = strip_mention(raw_text).strip()
     lower = text.lower()

@@ -1,6 +1,7 @@
 """Route-glue tests for POST /events — drives SlackHandler._handle_events with the
 socket methods (_send/_ack) stubbed, so no real HTTP is involved."""
 
+import io
 import json
 
 import pytest
@@ -97,4 +98,18 @@ def test_events_fail_closed_without_signing_secret(monkeypatch):
     monkeypatch.setattr(srv, "load_signing_secret", lambda: "")
     h = _events({"type": "url_verification", "challenge": "x"})
     assert h.sent == [(403, {"error": "events disabled: signing secret not configured"})]
+    assert not FakeThread.instances
+
+
+def test_removed_slash_route_returns_404(monkeypatch):
+    # The /reserve, /cancel, /list slash routes were removed — only /events remains.
+    # A signature-valid POST to /reserve must now 404 (not dispatch anything).
+    monkeypatch.setattr(srv, "verify_slack", lambda *a, **k: True)
+    h = FakeHandler()
+    h.headers = {"Content-Length": "0", "X-Slack-Request-Timestamp": "0",
+                 "X-Slack-Signature": ""}
+    h.rfile = io.BytesIO(b"")
+    h.path = "/reserve"
+    h.do_POST()
+    assert h.sent == [(404, {"error": "Not found"})]
     assert not FakeThread.instances
