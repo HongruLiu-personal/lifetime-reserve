@@ -18,10 +18,34 @@ maintaining the spec** — not executing it.
 ## Workflow (do these in order)
 
 ### 1. Gather context first — never spec from memory
-Before writing, investigate the actual codebase/system: read the relevant files,
-confirm how things currently work, check versions/deps/config, and verify any claim the
-spec will rely on. Cite concrete file paths and facts. A spec built on guesses is the
-main failure mode — every assumption you can cheaply verify, verify.
+Before writing, investigate the actual system and verify every claim the spec will rely
+on. Cite concrete facts (file paths, versions, command output). A spec built on guesses —
+or on stale docs — is the main failure mode; every assumption you can cheaply verify,
+verify.
+
+**Check each claim against its real source of truth — not whatever is easiest to read.**
+- **Repo-authoritative** — code structure, types, dependencies, config committed in the
+  tree: the codebase answers, so read the files.
+- **Environment-authoritative** — what is actually deployed and running, prod config and
+  feature flags, whether a migration/backfill has run, live versions, data state: the
+  *running system* answers. Check the prod deploy / live state directly; do **not** infer
+  these from documentation.
+
+**Treat docs about current state as hypotheses, not facts.** READMEs, code comments, and
+prior specs describe intent at a point in time and drift out of date. Any "not yet / not
+deployed / TODO / planned / as of ⟨date⟩" note is a claim to confirm against reality —
+above all when the plan's shape depends on it.
+
+**Verify the load-bearing premise first.** Name the one assumption that, if wrong, throws
+out the whole plan (e.g. "X isn't built yet," "Y is already live," "Z can't change").
+Verify that one hardest, against its real source of truth, before you structure the
+phases around it — being wrong here invalidates everything downstream.
+
+**Record evidence, not just verdicts.** For each load-bearing fact, capture what proved
+it (command output, a log line, a version string, a file:line) — not only the conclusion.
+This makes the spec auditable and lets a reviewer re-check the foundation cheaply. Note
+that agreement across documents is *not* evidence: docs often derive from one another, so
+several can be stale together. Only the system of record counts.
 
 ### 2. Create the doc in the research directory
 - Location: `research/` at the repo root. If it doesn't exist, create it with two
@@ -46,14 +70,18 @@ main failure mode — every assumption you can cheaply verify, verify.
 5. **Alternative Designs Considered** — the real options weighed, each with pros/cons and
    why it was or wasn't chosen. At least the ones a reviewer would ask "why not X?".
 6. **Open Questions** — decisions genuinely needing the user's input, each with a
-   recommended default. These become the review gate.
+   recommended default. These become the review gate. If a question can be answered by
+   *checking* (what's deployed, which version, how something behaves), it is **not** an
+   open question — resolve it in step 1, don't defer a verifiable fact to the user.
 7. **Appendix** — supporting detail: captured data, command references, links, raw
    findings that would clutter the body.
 
 ### 4. Critically review the spec after writing (mandatory)
 Do a genuine self-review pass — do not rubber-stamp your own draft. Hunt for:
 - internal contradictions (a decision in one section undercut in another),
-- unstated assumptions and unverified claims,
+- unstated assumptions and unverified claims — in particular, any load-bearing claim
+  about current/runtime state (what's deployed, live config, migration status) taken from
+  docs rather than checked against the running system,
 - gaps that would bite during implementation (sequencing, test/CI parity, rollback,
   security, concurrency, error paths),
 - sections that don't reconcile after edits.
